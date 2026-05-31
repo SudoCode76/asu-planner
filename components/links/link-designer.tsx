@@ -20,7 +20,14 @@ import { CABLE_TYPES, DEFAULT_LINK_VALUES, FIBER_TYPES, WAVELENGTHS } from "@/li
 
 const LinkMap = dynamic(
   () => import("@/components/map/link-map").then((mod) => mod.LinkMap),
-  { ssr: false }
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full min-h-[420px] w-full items-center justify-center rounded-lg bg-muted text-sm text-muted-foreground">
+        Cargando mapa...
+      </div>
+    ),
+  }
 )
 
 type FormState = {
@@ -79,6 +86,7 @@ export function LinkDesigner({
   error?: string
 }) {
   const [state, setState] = useState<FormState>(() => initialState(design))
+  const [realDistanceEdited, setRealDistanceEdited] = useState(false)
 
   const result = useMemo(
     () =>
@@ -95,14 +103,38 @@ export function LinkDesigner({
     setState((current) => ({ ...current, [key]: Number(value) }))
   }
 
+  function setRealDistance(value: string) {
+    setRealDistanceEdited(true)
+    setNumber("real_distance_km", value)
+  }
+
   function setPoints(pointA: Coordinate | null, pointB: Coordinate | null) {
     const distance = pointA && pointB ? calculateDistanceKm(pointA, pointB) : 0
+
+    if (!pointA || !pointB) {
+      setRealDistanceEdited(false)
+    }
+
     setState((current) => ({
       ...current,
       pointA,
       pointB,
       map_distance_km: distance,
-      real_distance_km: current.real_distance_km && distance ? current.real_distance_km : distance,
+      real_distance_km:
+        pointA && pointB && realDistanceEdited && current.real_distance_km > distance
+          ? current.real_distance_km
+          : distance,
+    }))
+  }
+
+  function clearPoints() {
+    setRealDistanceEdited(false)
+    setState((current) => ({
+      ...current,
+      pointA: null,
+      pointB: null,
+      map_distance_km: 0,
+      real_distance_km: 0,
     }))
   }
 
@@ -136,14 +168,14 @@ export function LinkDesigner({
               <LinkMap pointA={state.pointA} pointB={state.pointB} onChange={setPoints} />
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <Metric label="Punto A" value={state.pointA ? `${state.pointA.lat}, ${state.pointA.lng}` : "Sin seleccionar"} />
-              <Metric label="Punto B" value={state.pointB ? `${state.pointB.lat}, ${state.pointB.lng}` : "Sin seleccionar"} />
+              <Metric label="Punto A" value={state.pointA ? `${state.pointA.lat}, ${state.pointA.lng}` : "Haz clic en el mapa"} />
+              <Metric label="Punto B" value={state.pointB ? `${state.pointB.lat}, ${state.pointB.lng}` : state.pointA ? "Haz clic para cerrar el enlace" : "Pendiente"} />
               <Metric label="Distancia mapa" value={`${state.map_distance_km.toFixed(4)} km`} />
             </div>
             <Button
               type="button"
               variant="outline"
-              onClick={() => setPoints(null, null)}
+              onClick={clearPoints}
               className="w-fit"
             >
               <EraserIcon data-icon="inline-start" />
@@ -166,7 +198,7 @@ export function LinkDesigner({
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="real_distance_km">Distancia real del cable (km)</FieldLabel>
-                  <Input id="real_distance_km" name="real_distance_km" type="number" step="0.0001" min="0.0001" value={state.real_distance_km} onChange={(event) => setNumber("real_distance_km", event.target.value)} required />
+                  <Input id="real_distance_km" name="real_distance_km" type="number" step="0.0001" min="0.0001" value={state.real_distance_km} onChange={(event) => setRealDistance(event.target.value)} required />
                   <FieldDescription>Puede ser mayor que la distancia recta del mapa.</FieldDescription>
                 </Field>
               </div>
