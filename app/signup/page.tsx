@@ -3,6 +3,7 @@ import { UserPlusIcon } from "lucide-react"
 
 import { signup } from "@/app/actions/auth"
 import { AuthCard } from "@/components/auth/auth-card"
+import { AuthFeedback } from "@/components/auth/auth-feedback"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -30,11 +31,7 @@ export default async function SignupPage({ searchParams }: Props) {
     >
       <form action={signup}>
         <FieldGroup>
-          {error ? (
-            <p className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-              {error}
-            </p>
-          ) : null}
+          <AuthFeedback error={error} />
           <Field>
             <FieldLabel htmlFor="full_name">Nombre</FieldLabel>
             <Input id="full_name" name="full_name" required />
