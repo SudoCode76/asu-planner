@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useMemo, useState } from "react"
-import { EraserIcon, SaveIcon } from "lucide-react"
+import { EraserIcon, SaveIcon, SparklesIcon } from "lucide-react"
 
 import { saveDesign, updateDesign } from "@/app/actions/links"
 import { Button } from "@/components/ui/button"
@@ -51,6 +51,29 @@ type FormState = {
   connector_count: number
   connector_loss_db: number
   safety_margin_db: number
+}
+
+const DEMO_LINK_STATE: FormState = {
+  name: "Enlace demo ASU - Zona urbana",
+  description: "Diseno de prueba para validar calculos de presupuesto optico.",
+  origin_name: "Nodo Central",
+  destination_name: "Cliente Empresarial",
+  pointA: { lat: -17.783327, lng: -63.18214 },
+  pointB: { lat: -17.754962, lng: -63.161884 },
+  map_distance_km: 0,
+  real_distance_km: 4.25,
+  cable_type: "asu",
+  fiber_strands: 12,
+  wavelength_nm: 1550,
+  fiber_type: "single_mode",
+  transmitter_power_dbm: 3,
+  receiver_sensitivity_dbm: -24,
+  attenuation_db_per_km: 0.22,
+  splice_count: 6,
+  splice_loss_db: 0.1,
+  connector_count: 4,
+  connector_loss_db: 0.3,
+  safety_margin_db: 3,
 }
 
 function initialState(design?: LinkDesign): FormState {
@@ -138,6 +161,19 @@ export function LinkDesigner({
     }))
   }
 
+  function fillDemoData() {
+    const mapDistance = calculateDistanceKm(
+      DEMO_LINK_STATE.pointA as Coordinate,
+      DEMO_LINK_STATE.pointB as Coordinate
+    )
+
+    setRealDistanceEdited(false)
+    setState({
+      ...DEMO_LINK_STATE,
+      map_distance_km: mapDistance,
+    })
+  }
+
   return (
     <form action={action} className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
       {design ? <input type="hidden" name="id" value={design.id} /> : null}
@@ -180,6 +216,15 @@ export function LinkDesigner({
             >
               <EraserIcon data-icon="inline-start" />
               Limpiar puntos
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={fillDemoData}
+              className="w-fit"
+            >
+              <SparklesIcon data-icon="inline-start" />
+              Autocompletar demo
             </Button>
           </CardContent>
         </Card>
