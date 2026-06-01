@@ -1,7 +1,8 @@
 import Link from "next/link"
-import { DownloadIcon } from "lucide-react"
+import { DownloadIcon, FileTextIcon } from "lucide-react"
 
 import { DesignDetail } from "@/components/links/design-detail"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { getDesign, requireUser } from "@/lib/fibermap/data"
@@ -17,12 +18,23 @@ export default async function ReportPage({ params }: Props) {
 
   return (
     <>
-      <Card>
+      <Card className="overflow-hidden">
         <CardHeader>
           <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
-            <div>
-              <CardTitle>Reporte tecnico</CardTitle>
-              <CardDescription>Resumen listo para revision y exportacion.</CardDescription>
+            <div className="flex items-start gap-3">
+              <div className="flex size-10 items-center justify-center rounded-lg border bg-muted">
+                <FileTextIcon />
+              </div>
+              <div>
+                <div className="mb-2 flex flex-wrap gap-2">
+                  <Badge variant="secondary">Reporte tecnico</Badge>
+                  <Badge variant="outline">PDF disponible</Badge>
+                </div>
+                <CardTitle>Revision y exportacion</CardTitle>
+                <CardDescription>
+                  Resumen listo para revisar en pantalla y descargar como documento tecnico.
+                </CardDescription>
+              </div>
             </div>
             <Button asChild>
               <Link href={`/reports/${design.id}/pdf`} target="_blank">

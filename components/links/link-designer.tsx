@@ -6,6 +6,7 @@ import { useMemo, useState } from "react"
 import { EraserIcon, SaveIcon, SparklesIcon } from "lucide-react"
 
 import { saveDesign, updateDesign } from "@/app/actions/links"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet, FieldLegend } from "@/components/ui/field"
@@ -23,7 +24,7 @@ const LinkMap = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex h-full min-h-[420px] w-full items-center justify-center rounded-lg bg-muted text-sm text-muted-foreground">
+      <div className="flex h-[420px] w-full items-center justify-center rounded-lg bg-muted text-sm text-muted-foreground">
         Cargando mapa...
       </div>
     ),
@@ -192,40 +193,41 @@ export function LinkDesigner({
             {error}
           </p>
         ) : null}
-        <Card>
+        <Card className="overflow-hidden">
           <CardHeader>
-            <CardTitle>Mapa del enlace</CardTitle>
-            <CardDescription>
-              Haz clic para seleccionar Punto A y luego Punto B. El tercer clic reinicia la seleccion.
-            </CardDescription>
+            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+              <div>
+                <CardTitle>Mapa del enlace</CardTitle>
+                <CardDescription>
+                  Haz clic para seleccionar Punto A y luego Punto B. El tercer clic reinicia la seleccion.
+                </CardDescription>
+              </div>
+              <Badge variant={state.pointA && state.pointB ? "secondary" : "outline"}>
+                {state.pointA && state.pointB ? "Enlace definido" : "Seleccion pendiente"}
+              </Badge>
+            </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            <div className="overflow-hidden rounded-lg border">
-              <LinkMap pointA={state.pointA} pointB={state.pointB} onChange={setPoints} />
+            <div className="rounded-xl border bg-muted/40 p-1 shadow-sm">
+              <div className="overflow-hidden rounded-lg border bg-background">
+                <LinkMap pointA={state.pointA} pointB={state.pointB} onChange={setPoints} />
+              </div>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
               <Metric label="Punto A" value={state.pointA ? `${state.pointA.lat}, ${state.pointA.lng}` : "Haz clic en el mapa"} />
               <Metric label="Punto B" value={state.pointB ? `${state.pointB.lat}, ${state.pointB.lng}` : state.pointA ? "Haz clic para cerrar el enlace" : "Pendiente"} />
               <Metric label="Distancia mapa" value={`${state.map_distance_km.toFixed(4)} km`} />
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={clearPoints}
-              className="w-fit"
-            >
-              <EraserIcon data-icon="inline-start" />
-              Limpiar puntos
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={fillDemoData}
-              className="w-fit"
-            >
-              <SparklesIcon data-icon="inline-start" />
-              Autocompletar demo
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={clearPoints}>
+                <EraserIcon data-icon="inline-start" />
+                Limpiar puntos
+              </Button>
+              <Button type="button" variant="secondary" onClick={fillDemoData}>
+                <SparklesIcon data-icon="inline-start" />
+                Autocompletar demo
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
@@ -326,7 +328,7 @@ export function LinkDesigner({
       </div>
 
       <aside className="flex flex-col gap-6">
-        <Card className="sticky top-6">
+        <Card className="sticky top-6 overflow-hidden shadow-sm">
           <CardHeader>
             <div className="flex items-center justify-between gap-3">
               <CardTitle>Resultado</CardTitle>
@@ -370,7 +372,7 @@ export function LinkDesigner({
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border bg-background p-3">
+    <div className="rounded-lg border bg-muted/30 p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="truncate font-medium">{value}</p>
     </div>

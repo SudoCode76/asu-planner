@@ -3,6 +3,7 @@ import { DownloadIcon, EditIcon, Trash2Icon } from "lucide-react"
 
 import { deleteDesign } from "@/app/actions/links"
 import { StatusBadge } from "@/components/status-badge"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
@@ -17,14 +18,17 @@ export function DesignDetail({ design }: { design: LinkDesign }) {
   return (
     <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
       <div className="flex flex-col gap-6">
-        <Card>
+        <Card className="overflow-hidden">
           <CardHeader>
             <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
               <div>
                 <CardTitle>{design.name}</CardTitle>
                 <CardDescription>{design.description || "Sin descripcion"}</CardDescription>
               </div>
-              <StatusBadge status={design.status} />
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline">{design.real_distance_km.toFixed(4)} km</Badge>
+                <StatusBadge status={design.status} />
+              </div>
             </div>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2">
@@ -40,6 +44,7 @@ export function DesignDetail({ design }: { design: LinkDesign }) {
         <Card>
           <CardHeader>
             <CardTitle>Parametros tecnicos</CardTitle>
+            <CardDescription>Entradas guardadas para reproducir el calculo del enlace.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-3">
             <Info label="Cable" value={cableType ?? design.cable_type} />
@@ -57,6 +62,7 @@ export function DesignDetail({ design }: { design: LinkDesign }) {
         <Card>
           <CardHeader>
             <CardTitle>Recomendaciones</CardTitle>
+            <CardDescription>Sugerencias automaticas segun el margen final.</CardDescription>
           </CardHeader>
           <CardContent>
             <ul className="flex list-disc flex-col gap-2 pl-5 text-sm text-muted-foreground">
@@ -69,9 +75,12 @@ export function DesignDetail({ design }: { design: LinkDesign }) {
       </div>
 
       <aside className="flex flex-col gap-6">
-        <Card>
+        <Card className="overflow-hidden shadow-sm">
           <CardHeader>
-            <CardTitle>Resultado optico</CardTitle>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle>Resultado optico</CardTitle>
+              <StatusBadge status={design.status} />
+            </div>
             <CardDescription>Valores recalculados al guardar.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
@@ -112,7 +121,7 @@ export function DesignDetail({ design }: { design: LinkDesign }) {
 
 function Info({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border bg-background p-3">
+    <div className="rounded-lg border bg-muted/30 p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="break-words text-sm font-medium">{value}</p>
     </div>

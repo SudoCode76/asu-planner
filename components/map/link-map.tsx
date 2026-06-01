@@ -47,11 +47,27 @@ function MapViewport({
   const map = useMap()
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      map.invalidateSize()
-    }, 100)
+    map.invalidateSize()
 
-    return () => window.clearTimeout(timeout)
+    const timeouts = [100, 350, 700].map((delay) =>
+      window.setTimeout(() => {
+        map.invalidateSize()
+      }, delay)
+    )
+
+    return () => {
+      timeouts.forEach((timeout) => window.clearTimeout(timeout))
+    }
+  }, [map])
+
+  useEffect(() => {
+    const observer = new ResizeObserver(() => {
+      map.invalidateSize()
+    })
+
+    observer.observe(map.getContainer())
+
+    return () => observer.disconnect()
   }, [map])
 
   useEffect(() => {
@@ -100,8 +116,13 @@ export function LinkMap({
       : "Selecciona Punto A"
 
   return (
-    <div className="relative h-full min-h-[420px] w-full">
-      <MapContainer center={center} zoom={13} className="h-full min-h-[420px] w-full rounded-lg">
+    <div className="relative h-[420px] w-full min-w-0">
+      <MapContainer
+        center={center}
+        zoom={13}
+        scrollWheelZoom
+        className="h-full w-full rounded-lg bg-background"
+      >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

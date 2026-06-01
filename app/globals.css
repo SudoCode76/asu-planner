@@ -130,6 +130,15 @@
 }
 
 .leaflet-container {
-  min-height: 100%;
   font: inherit;
+  background: var(--background);
+}
+
+.leaflet-tile-pane {
+  background: oklch(1 0 0);
+}
+
+.leaflet-container img.leaflet-tile {
+  max-width: none !important;
+  max-height: none !important;
 }
