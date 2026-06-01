@@ -9,6 +9,7 @@ import {
 } from "lucide-react"
 
 import { logout } from "@/app/actions/auth"
+import { ThemeToggle } from "@/components/theme-toggle"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import type { User } from "@supabase/supabase-js"
@@ -49,6 +50,13 @@ export function AppShell({
           ))}
         </nav>
         <div className="flex flex-col gap-3 border-t p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">Tema</p>
+              <p className="text-xs text-muted-foreground">Claro, oscuro o sistema</p>
+            </div>
+            <ThemeToggle />
+          </div>
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">{user.email}</p>
             <p className="text-xs text-muted-foreground">Sesion activa</p>
@@ -65,12 +73,15 @@ export function AppShell({
         <Link href="/dashboard" className="font-semibold">
           FiberMap ASU
         </Link>
-        <Button asChild size="sm">
-          <Link href="/links/new">
-            <PlusIcon data-icon="inline-start" />
-            Nuevo
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <Button asChild size="sm">
+            <Link href="/links/new">
+              <PlusIcon data-icon="inline-start" />
+              Nuevo
+            </Link>
+          </Button>
+        </div>
       </header>
       <main className="lg:pl-64">
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 md:p-6">
