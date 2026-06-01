@@ -16,6 +16,7 @@ import type { LinkDesign } from "@/lib/database.types"
 import { parseRecommendations } from "@/lib/fibermap/calculations"
 import { CABLE_TYPES, FIBER_TYPES, STATUS_LABELS } from "@/lib/fibermap/constants"
 import { getDesign, requireUser } from "@/lib/fibermap/data"
+import { analyzeRoute, buildRoutePoints, parseMechanicalProfile, parseRoutePoints, type RouteAnalysis } from "@/lib/fibermap/gis"
 
 export const runtime = "nodejs"
 
@@ -263,14 +264,47 @@ function Section({
   )
 }
 
-function LinkSketch({ design }: { design: LinkDesign }) {
+function LinkSketch({ design, routeAnalysis }: { design: LinkDesign; routeAnalysis: RouteAnalysis }) {
+  const points = routeAnalysis.points.length ? routeAnalysis.points : [
+    { id: "a", label: "Punto A", kind: "endpoint_a" as const, lat: design.point_a_lat, lng: design.point_a_lng },
+    { id: "b", label: "Punto B", kind: "endpoint_b" as const, lat: design.point_b_lat, lng: design.point_b_lng },
+  ]
+  const sketchPoints = points.map((point, index) => {
+    const ratio = points.length === 1 ? 0 : index / (points.length - 1)
+    return {
+      ...point,
+      x: 72 + ratio * 356,
+      y: 98 - ratio * 46 + (index % 2 === 1 ? -14 : 10),
+    }
+  })
+
   return (
     <View style={styles.sketchBox}>
       <Svg width="100%" height="150" viewBox="0 0 500 150">
         <Rect x="0" y="0" width="500" height="150" fill="#f9fafb" />
-        <Line x1="72" y1="98" x2="428" y2="52" stroke="#111827" strokeWidth="4" />
-        <Circle cx="72" cy="98" r="12" fill="#111827" />
-        <Circle cx="428" cy="52" r="12" fill="#dc2626" />
+        {sketchPoints.slice(0, -1).map((point, index) => {
+          const next = sketchPoints[index + 1]
+          return (
+            <Line
+              key={`${point.id}-${next.id}`}
+              x1={point.x}
+              y1={point.y}
+              x2={next.x}
+              y2={next.y}
+              stroke="#111827"
+              strokeWidth="4"
+            />
+          )
+        })}
+        {sketchPoints.map((point, index) => (
+          <Circle
+            key={point.id}
+            cx={point.x}
+            cy={point.y}
+            r={point.kind === "pole" ? 7 : 10}
+            fill={index === 0 ? "#111827" : index === sketchPoints.length - 1 ? "#dc2626" : "#ca8a04"}
+          />
+        ))}
         <Text x="48" y="128" fill="#111827" style={{ fontSize: 14, fontWeight: 700 }}>
           Punto A
         </Text>
@@ -303,6 +337,7 @@ function ReportDocument({ design }: { design: LinkDesign }) {
   const recommendations = parseRecommendations(design)
   const cableType = labelFrom(CABLE_TYPES, design.cable_type)
   const fiberType = labelFrom(FIBER_TYPES, design.fiber_type)
+  const routeAnalysis = readRouteAnalysis(design)
 
   return (
     <Document
@@ -371,7 +406,29 @@ function ReportDocument({ design }: { design: LinkDesign }) {
         </Section>
 
         <Section title="Croquis tecnico del enlace">
-          <LinkSketch design={design} />
+          <LinkSketch design={design} routeAnalysis={routeAnalysis} />
+        </Section>
+
+        <Section title="Ruta GIS, vanos y perfil mecanico">
+          <DataTable
+            rows={[
+              { label: "Puntos de ruta", value: String(routeAnalysis.points.length) },
+              { label: "Tramos", value: String(routeAnalysis.spans.length) },
+              { label: "Longitud por tramos", value: fixed(routeAnalysis.total_distance_km, "km") },
+              { label: "Reserva de cable", value: fixed(routeAnalysis.reserve_length_km, "km") },
+              { label: "Cable total", value: fixed(routeAnalysis.total_cable_length_km, "km") },
+              { label: "Vano maximo", value: `${routeAnalysis.max_span_m.toFixed(2)} m` },
+              { label: "Perfil", value: routeAnalysis.mechanical_profile.name },
+            ]}
+          />
+          {routeAnalysis.spans.slice(0, 8).map((span) => (
+            <Text key={span.index} style={styles.formula}>
+              Tramo {span.index}: {span.from_label} - {span.to_label}; {span.span_m.toFixed(2)} m; flecha {span.estimated_sag_m.toFixed(2)} m.
+            </Text>
+          ))}
+          {routeAnalysis.warnings.map((warning) => (
+            <Text key={warning} style={styles.recommendation}>- {warning}</Text>
+          ))}
         </Section>
 
         <Section title="Parametros opticos">
@@ -449,5 +506,22 @@ function ReportDocument({ design }: { design: LinkDesign }) {
         </Text>
       </Page>
     </Document>
+  )
+}
+
+function readRouteAnalysis(design: LinkDesign): RouteAnalysis {
+  const saved = design.route_analysis
+
+  if (saved && typeof saved === "object" && "spans" in saved) {
+    return saved as unknown as RouteAnalysis
+  }
+
+  return analyzeRoute(
+    buildRoutePoints(
+      { lat: design.point_a_lat, lng: design.point_a_lng },
+      parseRoutePoints(design.route_points),
+      { lat: design.point_b_lat, lng: design.point_b_lng }
+    ),
+    parseMechanicalProfile(design.mechanical_profile)
   )
 }

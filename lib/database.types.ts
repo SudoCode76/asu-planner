@@ -23,8 +23,10 @@ export type Database = {
           fiber_strands: number
           fiber_type: Database["public"]["Enums"]["fiber_type"]
           final_margin_db: number
+          gis_layers: Json
           id: string
           map_distance_km: number
+          mechanical_profile: Json
           name: string
           optical_budget_db: number
           origin_name: string | null
@@ -35,6 +37,8 @@ export type Database = {
           real_distance_km: number
           receiver_sensitivity_dbm: number
           recommendations: Json
+          route_analysis: Json
+          route_points: Json
           safety_margin_db: number
           splice_count: number
           splice_loss_db: number
@@ -73,6 +77,173 @@ export type Database = {
           updated_at?: string
         }
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>
+      }
+      gis_layers: {
+        Row: {
+          id: string
+          user_id: string
+          name: string
+          description: string | null
+          layer_type: "geojson" | "kml" | "drawn"
+          data: Json
+          feature_count: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: Omit<Database["public"]["Tables"]["gis_layers"]["Row"], "id" | "created_at" | "updated_at"> & {
+          id?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["gis_layers"]["Insert"]>
+      }
+      gis_features: {
+        Row: {
+          id: string
+          user_id: string
+          layer_id: string | null
+          name: string | null
+          feature_type: string
+          properties: Json
+          geometry: Json
+          geom: unknown | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: Omit<Database["public"]["Tables"]["gis_features"]["Row"], "id" | "created_at" | "updated_at"> & {
+          id?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["gis_features"]["Insert"]>
+      }
+      network_assets: {
+        Row: {
+          id: string
+          user_id: string
+          name: string
+          asset_type: "node" | "pole" | "splice_box" | "client" | "reserve" | "other"
+          latitude: number
+          longitude: number
+          geom: unknown
+          metadata: Json
+          created_at: string
+          updated_at: string
+        }
+        Insert: Omit<Database["public"]["Tables"]["network_assets"]["Row"], "id" | "geom" | "created_at" | "updated_at"> & {
+          id?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["network_assets"]["Insert"]>
+      }
+      cable_catalog: {
+        Row: {
+          id: string
+          user_id: string | null
+          name: string
+          cable_type: Database["public"]["Enums"]["cable_type"]
+          fiber_strands: number
+          attenuation_1310_db_per_km: number
+          attenuation_1550_db_per_km: number
+          max_span_m: number
+          cable_weight_n_per_m: number
+          metadata: Json
+          created_at: string
+          updated_at: string
+        }
+        Insert: Omit<Database["public"]["Tables"]["cable_catalog"]["Row"], "id" | "created_at" | "updated_at"> & {
+          id?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["cable_catalog"]["Insert"]>
+      }
+      mechanical_profiles: {
+        Row: {
+          id: string
+          user_id: string | null
+          name: string
+          max_span_m: number
+          reserve_percent: number
+          cable_weight_n_per_m: number
+          installation_tension_n: number
+          max_tension_n: number
+          max_sag_percent: number
+          metadata: Json
+          created_at: string
+          updated_at: string
+        }
+        Insert: Omit<Database["public"]["Tables"]["mechanical_profiles"]["Row"], "id" | "created_at" | "updated_at"> & {
+          id?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["mechanical_profiles"]["Insert"]>
+      }
+      fiber_routes: {
+        Row: {
+          id: string
+          user_id: string
+          design_id: string | null
+          name: string
+          route_points: Json
+          route_analysis: Json
+          geom: unknown | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: Omit<Database["public"]["Tables"]["fiber_routes"]["Row"], "id" | "created_at" | "updated_at"> & {
+          id?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["fiber_routes"]["Insert"]>
+      }
+      fiber_route_points: {
+        Row: {
+          id: string
+          user_id: string
+          route_id: string
+          point_order: number
+          point_kind: string
+          label: string
+          latitude: number
+          longitude: number
+          geom: unknown
+          metadata: Json
+          created_at: string
+          updated_at: string
+        }
+        Insert: Omit<Database["public"]["Tables"]["fiber_route_points"]["Row"], "id" | "geom" | "created_at" | "updated_at"> & {
+          id?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["fiber_route_points"]["Insert"]>
+      }
+      fiber_route_spans: {
+        Row: {
+          id: string
+          user_id: string
+          route_id: string
+          span_order: number
+          from_label: string
+          to_label: string
+          distance_km: number
+          span_m: number
+          estimated_sag_m: number
+          sag_percent: number
+          warnings: Json
+          created_at: string
+          updated_at: string
+        }
+        Insert: Omit<Database["public"]["Tables"]["fiber_route_spans"]["Row"], "id" | "created_at" | "updated_at"> & {
+          id?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["fiber_route_spans"]["Insert"]>
       }
     }
     Views: Record<string, never>

@@ -2,10 +2,24 @@
 
 import dynamic from "next/dynamic"
 import Link from "next/link"
-import { useMemo, useState } from "react"
-import { EraserIcon, SaveIcon, SparklesIcon } from "lucide-react"
+import { ChangeEvent, useMemo, useRef, useState } from "react"
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  DownloadIcon,
+  EraserIcon,
+  FileUpIcon,
+  MapPinnedIcon,
+  PencilRulerIcon,
+  PlusIcon,
+  RouteIcon,
+  SaveIcon,
+  SparklesIcon,
+  Trash2Icon,
+} from "lucide-react"
 
 import { saveDesign, updateDesign } from "@/app/actions/links"
+import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -13,11 +27,22 @@ import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet, FieldLegend 
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { StatusBadge } from "@/components/status-badge"
 import type { LinkDesign } from "@/lib/database.types"
 import { calculateDistanceKm, calculateOpticalBudget, type Coordinate } from "@/lib/fibermap/calculations"
 import { CABLE_TYPES, DEFAULT_LINK_VALUES, FIBER_TYPES, WAVELENGTHS } from "@/lib/fibermap/constants"
+import {
+  DEFAULT_MECHANICAL_PROFILE,
+  analyzeRoute,
+  buildRoutePoints,
+  parseGisLayers,
+  parseMechanicalProfile,
+  parseRoutePoints,
+  type GisLayer,
+  type MechanicalProfile,
+  type RoutePoint,
+} from "@/lib/fibermap/gis"
 
 const LinkMap = dynamic(
   () => import("@/components/map/link-map").then((mod) => mod.LinkMap),
@@ -30,6 +55,8 @@ const LinkMap = dynamic(
     ),
   }
 )
+
+type MapMode = "select" | "pole" | "measure" | "inspect"
 
 type FormState = {
   name: string
@@ -52,11 +79,14 @@ type FormState = {
   connector_count: number
   connector_loss_db: number
   safety_margin_db: number
+  route_points: RoutePoint[]
+  gis_layers: GisLayer[]
+  mechanical_profile: MechanicalProfile
 }
 
 const DEMO_LINK_STATE: FormState = {
   name: "Enlace demo ASU - Zona urbana",
-  description: "Diseno de prueba para validar calculos de presupuesto optico.",
+  description: "Diseno de prueba con postes intermedios para validar calculos GIS, mecanicos y presupuesto optico.",
   origin_name: "Nodo Central",
   destination_name: "Cliente Empresarial",
   pointA: { lat: -17.783327, lng: -63.18214 },
@@ -75,6 +105,13 @@ const DEMO_LINK_STATE: FormState = {
   connector_count: 4,
   connector_loss_db: 0.3,
   safety_margin_db: 3,
+  route_points: [
+    { id: "demo-pole-1", kind: "pole", label: "Poste 1", lat: -17.776521, lng: -63.176984 },
+    { id: "demo-pole-2", kind: "pole", label: "Poste 2", lat: -17.769807, lng: -63.172223 },
+    { id: "demo-pole-3", kind: "splice", label: "Empalme 1", lat: -17.763349, lng: -63.167138 },
+  ],
+  gis_layers: [],
+  mechanical_profile: DEFAULT_MECHANICAL_PROFILE,
 }
 
 function initialState(design?: LinkDesign): FormState {
@@ -99,6 +136,9 @@ function initialState(design?: LinkDesign): FormState {
     connector_count: design?.connector_count ?? DEFAULT_LINK_VALUES.connector_count,
     connector_loss_db: design?.connector_loss_db ?? DEFAULT_LINK_VALUES.connector_loss_db,
     safety_margin_db: design?.safety_margin_db ?? DEFAULT_LINK_VALUES.safety_margin_db,
+    route_points: parseRoutePoints(design?.route_points),
+    gis_layers: parseGisLayers(design?.gis_layers),
+    mechanical_profile: parseMechanicalProfile(design?.mechanical_profile),
   }
 }
 
@@ -109,22 +149,42 @@ export function LinkDesigner({
   design?: LinkDesign
   error?: string
 }) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [state, setState] = useState<FormState>(() => initialState(design))
+  const [mapMode, setMapMode] = useState<MapMode>("select")
   const [realDistanceEdited, setRealDistanceEdited] = useState(false)
 
+  const routeAnalysis = useMemo(() => {
+    return analyzeRoute(
+      buildRoutePoints(state.pointA, state.route_points, state.pointB),
+      state.mechanical_profile
+    )
+  }, [state.pointA, state.pointB, state.route_points, state.mechanical_profile])
+
+  const effectiveDistance = routeAnalysis.total_cable_length_km || state.real_distance_km || state.map_distance_km
   const result = useMemo(
     () =>
       calculateOpticalBudget({
         ...state,
-        real_distance_km: state.real_distance_km || state.map_distance_km,
+        real_distance_km: effectiveDistance,
       }),
-    [state]
+    [state, effectiveDistance]
   )
 
   const action = design ? updateDesign : saveDesign
 
   function setNumber(key: keyof FormState, value: string) {
     setState((current) => ({ ...current, [key]: Number(value) }))
+  }
+
+  function setMechanicalNumber(key: keyof MechanicalProfile, value: string) {
+    setState((current) => ({
+      ...current,
+      mechanical_profile: {
+        ...current.mechanical_profile,
+        [key]: Number(value),
+      },
+    }))
   }
 
   function setRealDistance(value: string) {
@@ -143,6 +203,7 @@ export function LinkDesigner({
       ...current,
       pointA,
       pointB,
+      route_points: pointA ? current.route_points : [],
       map_distance_km: distance,
       real_distance_km:
         pointA && pointB && realDistanceEdited && current.real_distance_km > distance
@@ -157,6 +218,7 @@ export function LinkDesigner({
       ...current,
       pointA: null,
       pointB: null,
+      route_points: [],
       map_distance_km: 0,
       real_distance_km: 0,
     }))
@@ -175,6 +237,91 @@ export function LinkDesigner({
     })
   }
 
+  function updateRoutePoint(index: number, key: "label" | "kind", value: string) {
+    setState((current) => ({
+      ...current,
+      route_points: current.route_points.map((point, pointIndex) =>
+        pointIndex === index ? { ...point, [key]: value } as RoutePoint : point
+      ),
+    }))
+  }
+
+  function moveRoutePoint(index: number, direction: -1 | 1) {
+    setState((current) => {
+      const nextIndex = index + direction
+      if (nextIndex < 0 || nextIndex >= current.route_points.length) return current
+
+      const routePoints = [...current.route_points]
+      const [point] = routePoints.splice(index, 1)
+      routePoints.splice(nextIndex, 0, point)
+
+      return { ...current, route_points: routePoints }
+    })
+  }
+
+  function removeRoutePoint(index: number) {
+    setState((current) => ({
+      ...current,
+      route_points: current.route_points.filter((_, pointIndex) => pointIndex !== index),
+    }))
+  }
+
+  function exportGeoJson() {
+    const lineCoordinates = routeAnalysis.points.map((point) => [point.lng, point.lat])
+    const features = [
+      ...(lineCoordinates.length >= 2
+        ? [{
+            type: "Feature",
+            properties: { name: state.name || "Ruta FiberMap ASU", kind: "fiber_route" },
+            geometry: { type: "LineString", coordinates: lineCoordinates },
+          }]
+        : []),
+      ...routeAnalysis.points.map((point) => ({
+        type: "Feature",
+        properties: { name: point.label, kind: point.kind },
+        geometry: { type: "Point", coordinates: [point.lng, point.lat] },
+      })),
+    ]
+    const geojson = {
+      type: "FeatureCollection",
+      features,
+    }
+    const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: "application/geo+json" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `${slugify(state.name || "fibermap-asu-ruta")}.geojson`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function importLayer(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    const text = await file.text()
+    const layerData = file.name.toLowerCase().endsWith(".kml")
+      ? kmlToGeoJson(text)
+      : JSON.parse(text)
+    const featureCount = Array.isArray(layerData.features) ? layerData.features.length : 1
+
+    setState((current) => ({
+      ...current,
+      gis_layers: [
+        ...current.gis_layers,
+        {
+          id: `layer-${Date.now()}`,
+          name: file.name,
+          type: file.name.toLowerCase().endsWith(".kml") ? "kml" : "geojson",
+          featureCount,
+          data: layerData,
+        },
+      ],
+    }))
+
+    event.target.value = ""
+  }
+
   return (
     <form action={action} className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
       {design ? <input type="hidden" name="id" value={design.id} /> : null}
@@ -183,6 +330,9 @@ export function LinkDesigner({
       <input type="hidden" name="point_b_lat" value={state.pointB?.lat ?? ""} />
       <input type="hidden" name="point_b_lng" value={state.pointB?.lng ?? ""} />
       <input type="hidden" name="map_distance_km" value={state.map_distance_km} />
+      <input type="hidden" name="route_points" value={JSON.stringify(state.route_points)} />
+      <input type="hidden" name="gis_layers" value={JSON.stringify(state.gis_layers)} />
+      <input type="hidden" name="mechanical_profile" value={JSON.stringify(state.mechanical_profile)} />
       <input type="hidden" name="cable_type" value={state.cable_type} />
       <input type="hidden" name="wavelength_nm" value={state.wavelength_nm} />
       <input type="hidden" name="fiber_type" value={state.fiber_type} />
@@ -193,136 +343,171 @@ export function LinkDesigner({
             {error}
           </p>
         ) : null}
+
         <Card className="overflow-hidden">
           <CardHeader>
             <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
               <div>
-                <CardTitle>Mapa del enlace</CardTitle>
+                <CardTitle>Disenador GIS del enlace</CardTitle>
                 <CardDescription>
-                  Haz clic para seleccionar Punto A y luego Punto B. El tercer clic reinicia la seleccion.
+                  Define Punto A/B, agrega postes intermedios, importa capas y revisa vanos antes de guardar.
                 </CardDescription>
               </div>
               <Badge variant={state.pointA && state.pointB ? "secondary" : "outline"}>
-                {state.pointA && state.pointB ? "Enlace definido" : "Seleccion pendiente"}
+                {state.pointA && state.pointB ? "Ruta definida" : "Seleccion pendiente"}
               </Badge>
             </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            <div className="rounded-xl border bg-muted/40 p-1 shadow-sm">
-              <div className="overflow-hidden rounded-lg border bg-background">
-                <LinkMap pointA={state.pointA} pointB={state.pointB} onChange={setPoints} />
-              </div>
-            </div>
-            <div className="grid gap-3 md:grid-cols-3">
-              <Metric label="Punto A" value={state.pointA ? `${state.pointA.lat}, ${state.pointA.lng}` : "Haz clic en el mapa"} />
-              <Metric label="Punto B" value={state.pointB ? `${state.pointB.lat}, ${state.pointB.lng}` : state.pointA ? "Haz clic para cerrar el enlace" : "Pendiente"} />
-              <Metric label="Distancia mapa" value={`${state.map_distance_km.toFixed(4)} km`} />
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" onClick={clearPoints}>
-                <EraserIcon data-icon="inline-start" />
-                Limpiar puntos
-              </Button>
-              <Button type="button" variant="secondary" onClick={fillDemoData}>
-                <SparklesIcon data-icon="inline-start" />
-                Autocompletar demo
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+            <Tabs defaultValue="mapa" className="flex flex-col gap-4">
+              <TabsList className="grid w-full grid-cols-5">
+                <TabsTrigger value="mapa">Mapa</TabsTrigger>
+                <TabsTrigger value="ruta">Ruta</TabsTrigger>
+                <TabsTrigger value="optico">Optico</TabsTrigger>
+                <TabsTrigger value="mecanico">Mecanico</TabsTrigger>
+                <TabsTrigger value="capas">Capas</TabsTrigger>
+              </TabsList>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Datos del enlace</CardTitle>
-            <CardDescription>Identifica el diseno y ajusta la distancia real del cable.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <FieldGroup>
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor="name">Nombre del enlace</FieldLabel>
-                  <Input id="name" name="name" value={state.name} onChange={(event) => setState({ ...state, name: event.target.value })} required />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="real_distance_km">Distancia real del cable (km)</FieldLabel>
-                  <Input id="real_distance_km" name="real_distance_km" type="number" step="0.0001" min="0.0001" value={state.real_distance_km} onChange={(event) => setRealDistance(event.target.value)} required />
-                  <FieldDescription>Puede ser mayor que la distancia recta del mapa.</FieldDescription>
-                </Field>
-              </div>
-              <Field>
-                <FieldLabel htmlFor="description">Descripcion</FieldLabel>
-                <Textarea id="description" name="description" value={state.description} onChange={(event) => setState({ ...state, description: event.target.value })} />
-              </Field>
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor="origin_name">Origen</FieldLabel>
-                  <Input id="origin_name" name="origin_name" value={state.origin_name} onChange={(event) => setState({ ...state, origin_name: event.target.value })} />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="destination_name">Destino</FieldLabel>
-                  <Input id="destination_name" name="destination_name" value={state.destination_name} onChange={(event) => setState({ ...state, destination_name: event.target.value })} />
-                </Field>
-              </div>
-              <div className="grid gap-4 md:grid-cols-3">
-                <SelectField label="Tipo de cable" value={state.cable_type} items={CABLE_TYPES} onChange={(value) => setState({ ...state, cable_type: value as FormState["cable_type"] })} />
-                <Field>
-                  <FieldLabel htmlFor="fiber_strands">Hilos</FieldLabel>
-                  <Input id="fiber_strands" name="fiber_strands" type="number" min="1" value={state.fiber_strands} onChange={(event) => setNumber("fiber_strands", event.target.value)} required />
-                </Field>
-                <SelectField label="Longitud de onda" value={String(state.wavelength_nm)} items={WAVELENGTHS.map((item) => ({ value: String(item.value), label: item.label }))} onChange={(value) => setState({ ...state, wavelength_nm: Number(value) as 1310 | 1550 })} />
-              </div>
-            </FieldGroup>
-          </CardContent>
-        </Card>
+              <TabsContent value="mapa" className="flex flex-col gap-4">
+                <div className="flex flex-wrap gap-2">
+                  <ModeButton mode="select" current={mapMode} onClick={setMapMode} label="A/B" icon={MapPinnedIcon} />
+                  <ModeButton mode="pole" current={mapMode} onClick={setMapMode} label="Postes" icon={PlusIcon} />
+                  <ModeButton mode="measure" current={mapMode} onClick={setMapMode} label="Medir" icon={PencilRulerIcon} />
+                  <ModeButton mode="inspect" current={mapMode} onClick={setMapMode} label="Inspeccionar" icon={RouteIcon} />
+                </div>
+                <div className="rounded-xl border bg-muted/40 p-1 shadow-sm">
+                  <div className="overflow-hidden rounded-lg border bg-background">
+                    <LinkMap
+                      pointA={state.pointA}
+                      pointB={state.pointB}
+                      mode={mapMode}
+                      routePoints={state.route_points}
+                      gisLayers={state.gis_layers}
+                      onChange={setPoints}
+                      onRoutePointsChange={(points) => setState((current) => ({ ...current, route_points: points }))}
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <Metric label="Punto A" value={state.pointA ? `${state.pointA.lat}, ${state.pointA.lng}` : "Haz clic en el mapa"} />
+                  <Metric label="Punto B" value={state.pointB ? `${state.pointB.lat}, ${state.pointB.lng}` : state.pointA ? "Haz clic para cerrar el enlace" : "Pendiente"} />
+                  <Metric label="Distancia por ruta" value={`${routeAnalysis.total_cable_length_km.toFixed(4)} km`} />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" onClick={clearPoints}>
+                    <EraserIcon data-icon="inline-start" />
+                    Limpiar puntos
+                  </Button>
+                  <Button type="button" variant="secondary" onClick={fillDemoData}>
+                    <SparklesIcon data-icon="inline-start" />
+                    Autocompletar demo
+                  </Button>
+                  <Button type="button" variant="outline" onClick={exportGeoJson}>
+                    <DownloadIcon data-icon="inline-start" />
+                    Exportar GeoJSON
+                  </Button>
+                </div>
+              </TabsContent>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Parametros tecnicos</CardTitle>
-            <CardDescription>Estos valores alimentan el presupuesto optico.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <FieldSet>
-              <FieldLegend>Equipos y fibra</FieldLegend>
-              <div className="grid gap-4 md:grid-cols-3">
-                <Field>
-                  <FieldLabel htmlFor="transmitter_power_dbm">Potencia TX (dBm)</FieldLabel>
-                  <Input id="transmitter_power_dbm" name="transmitter_power_dbm" type="number" step="0.001" value={state.transmitter_power_dbm} onChange={(event) => setNumber("transmitter_power_dbm", event.target.value)} required />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="receiver_sensitivity_dbm">Sensibilidad RX (dBm)</FieldLabel>
-                  <Input id="receiver_sensitivity_dbm" name="receiver_sensitivity_dbm" type="number" step="0.001" value={state.receiver_sensitivity_dbm} onChange={(event) => setNumber("receiver_sensitivity_dbm", event.target.value)} required />
-                </Field>
-                <SelectField label="Tipo de fibra" value={state.fiber_type} items={FIBER_TYPES} onChange={(value) => setState({ ...state, fiber_type: value as FormState["fiber_type"] })} />
-              </div>
-              <div className="grid gap-4 md:grid-cols-4">
-                <Field>
-                  <FieldLabel htmlFor="attenuation_db_per_km">Atenuacion (dB/km)</FieldLabel>
-                  <Input id="attenuation_db_per_km" name="attenuation_db_per_km" type="number" step="0.0001" min="0" value={state.attenuation_db_per_km} onChange={(event) => setNumber("attenuation_db_per_km", event.target.value)} required />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="splice_count">Empalmes</FieldLabel>
-                  <Input id="splice_count" name="splice_count" type="number" min="0" value={state.splice_count} onChange={(event) => setNumber("splice_count", event.target.value)} required />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="splice_loss_db">Perdida/empalme</FieldLabel>
-                  <Input id="splice_loss_db" name="splice_loss_db" type="number" step="0.0001" min="0" value={state.splice_loss_db} onChange={(event) => setNumber("splice_loss_db", event.target.value)} required />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="safety_margin_db">Margen seguridad</FieldLabel>
-                  <Input id="safety_margin_db" name="safety_margin_db" type="number" step="0.001" min="0" value={state.safety_margin_db} onChange={(event) => setNumber("safety_margin_db", event.target.value)} required />
-                </Field>
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor="connector_count">Conectores</FieldLabel>
-                  <Input id="connector_count" name="connector_count" type="number" min="0" value={state.connector_count} onChange={(event) => setNumber("connector_count", event.target.value)} required />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="connector_loss_db">Perdida/conector</FieldLabel>
-                  <Input id="connector_loss_db" name="connector_loss_db" type="number" step="0.0001" min="0" value={state.connector_loss_db} onChange={(event) => setNumber("connector_loss_db", event.target.value)} required />
-                </Field>
-              </div>
-            </FieldSet>
+              <TabsContent value="ruta" className="flex flex-col gap-4">
+                <div className="grid gap-3 md:grid-cols-4">
+                  <Metric label="Puntos de ruta" value={String(routeAnalysis.points.length)} />
+                  <Metric label="Tramos" value={String(routeAnalysis.spans.length)} />
+                  <Metric label="Reserva" value={`${routeAnalysis.reserve_length_km.toFixed(4)} km`} />
+                  <Metric label="Vano maximo" value={`${routeAnalysis.max_span_m.toFixed(2)} m`} />
+                </div>
+                <div className="flex flex-col gap-2">
+                  {state.route_points.length ? (
+                    state.route_points.map((point, index) => (
+                      <div key={point.id} className="grid gap-2 rounded-lg border bg-muted/30 p-3 md:grid-cols-[1fr_140px_auto]">
+                        <Input
+                          value={point.label}
+                          onChange={(event) => updateRoutePoint(index, "label", event.target.value)}
+                          aria-label={`Nombre del punto ${index + 1}`}
+                        />
+                        <Select value={point.kind} onValueChange={(value) => updateRoutePoint(index, "kind", value)}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              <SelectItem value="pole">Poste</SelectItem>
+                              <SelectItem value="splice">Empalme</SelectItem>
+                              <SelectItem value="reserve">Reserva</SelectItem>
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                        <div className="flex gap-1">
+                          <Button type="button" size="icon" variant="outline" onClick={() => moveRoutePoint(index, -1)} aria-label="Subir punto">
+                            <ArrowUpIcon />
+                          </Button>
+                          <Button type="button" size="icon" variant="outline" onClick={() => moveRoutePoint(index, 1)} aria-label="Bajar punto">
+                            <ArrowDownIcon />
+                          </Button>
+                          <Button type="button" size="icon" variant="destructive" onClick={() => removeRoutePoint(index)} aria-label="Eliminar punto">
+                            <Trash2Icon />
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
+                      Cambia el modo del mapa a Postes y haz clic sobre el recorrido para construir la ruta real.
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="optico">
+                <LinkDataFields state={state} setState={setState} setNumber={setNumber} setRealDistance={setRealDistance} />
+              </TabsContent>
+
+              <TabsContent value="mecanico">
+                <MechanicalFields state={state} setState={setState} setMechanicalNumber={setMechanicalNumber} />
+              </TabsContent>
+
+              <TabsContent value="capas" className="flex flex-col gap-4">
+                <input ref={fileInputRef} type="file" accept=".geojson,.json,.kml" className="hidden" onChange={(event) => void importLayer(event)} />
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
+                    <FileUpIcon data-icon="inline-start" />
+                    Importar GeoJSON/KML
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => setState((current) => ({ ...current, gis_layers: [] }))}>
+                    <EraserIcon data-icon="inline-start" />
+                    Limpiar capas
+                  </Button>
+                </div>
+                <div className="grid gap-3">
+                  {state.gis_layers.length ? (
+                    state.gis_layers.map((layer) => (
+                      <div key={layer.id} className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">{layer.name}</p>
+                          <p className="text-xs text-muted-foreground">{layer.type.toUpperCase()} - {layer.featureCount} geometria(s)</p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setState((current) => ({
+                            ...current,
+                            gis_layers: current.gis_layers.filter((item) => item.id !== layer.id),
+                          }))}
+                          aria-label="Eliminar capa"
+                        >
+                          <Trash2Icon />
+                        </Button>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
+                      No hay capas importadas. Puedes cargar restricciones, zonas, rutas de referencia o notas de campo en GeoJSON/KML.
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
       </div>
@@ -334,20 +519,28 @@ export function LinkDesigner({
               <CardTitle>Resultado</CardTitle>
               <StatusBadge status={result.status} />
             </div>
-            <CardDescription>Calculo en vivo; al guardar se recalcula en servidor.</CardDescription>
+            <CardDescription>El calculo visible es auxiliar; al guardar se recalcula en servidor.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
             <div className="grid gap-3">
+              <Metric label="Cable total con reserva" value={`${effectiveDistance.toFixed(4)} km`} />
               <Metric label="Perdida por distancia" value={`${result.fiber_loss_db.toFixed(4)} dB`} />
-              <Metric label="Perdida empalmes" value={`${result.total_splice_loss_db.toFixed(4)} dB`} />
-              <Metric label="Perdida conectores" value={`${result.total_connector_loss_db.toFixed(4)} dB`} />
               <Metric label="Perdida total" value={`${result.total_loss_db.toFixed(4)} dB`} />
               <Metric label="Presupuesto optico" value={`${result.optical_budget_db.toFixed(4)} dB`} />
               <Metric label="Margen final" value={`${result.final_margin_db.toFixed(4)} dB`} />
             </div>
             <Separator />
             <div className="flex flex-col gap-2">
-              <p className="text-sm font-medium">Recomendaciones</p>
+              <p className="text-sm font-medium">Advertencias GIS/mecanicas</p>
+              <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-muted-foreground">
+                {routeAnalysis.warnings.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+            <Separator />
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium">Recomendaciones opticas</p>
               <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-muted-foreground">
                 {result.recommendations.map((item) => (
                   <li key={item}>{item}</li>
@@ -367,6 +560,202 @@ export function LinkDesigner({
         </Card>
       </aside>
     </form>
+  )
+}
+
+function LinkDataFields({
+  state,
+  setState,
+  setNumber,
+  setRealDistance,
+}: {
+  state: FormState
+  setState: (state: FormState) => void
+  setNumber: (key: keyof FormState, value: string) => void
+  setRealDistance: (value: string) => void
+}) {
+  return (
+    <div className="flex flex-col gap-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Datos del enlace</CardTitle>
+          <CardDescription>Identifica el diseno y ajusta la distancia real del cable si aplica.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FieldGroup>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="name">Nombre del enlace</FieldLabel>
+                <Input id="name" name="name" value={state.name} onChange={(event) => setState({ ...state, name: event.target.value })} required />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="real_distance_km">Distancia manual de cable (km)</FieldLabel>
+                <Input id="real_distance_km" name="real_distance_km" type="number" step="0.0001" min="0.0001" value={state.real_distance_km} onChange={(event) => setRealDistance(event.target.value)} required />
+                <FieldDescription>Si hay postes, el servidor prioriza la distancia por ruta con reserva.</FieldDescription>
+              </Field>
+            </div>
+            <Field>
+              <FieldLabel htmlFor="description">Descripcion</FieldLabel>
+              <Textarea id="description" name="description" value={state.description} onChange={(event) => setState({ ...state, description: event.target.value })} />
+            </Field>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="origin_name">Origen</FieldLabel>
+                <Input id="origin_name" name="origin_name" value={state.origin_name} onChange={(event) => setState({ ...state, origin_name: event.target.value })} />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="destination_name">Destino</FieldLabel>
+                <Input id="destination_name" name="destination_name" value={state.destination_name} onChange={(event) => setState({ ...state, destination_name: event.target.value })} />
+              </Field>
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              <SelectField label="Tipo de cable" value={state.cable_type} items={CABLE_TYPES} onChange={(value) => setState({ ...state, cable_type: value as FormState["cable_type"] })} />
+              <Field>
+                <FieldLabel htmlFor="fiber_strands">Hilos</FieldLabel>
+                <Input id="fiber_strands" name="fiber_strands" type="number" min="1" value={state.fiber_strands} onChange={(event) => setNumber("fiber_strands", event.target.value)} required />
+              </Field>
+              <SelectField label="Longitud de onda" value={String(state.wavelength_nm)} items={WAVELENGTHS.map((item) => ({ value: String(item.value), label: item.label }))} onChange={(value) => setState({ ...state, wavelength_nm: Number(value) as 1310 | 1550 })} />
+            </div>
+          </FieldGroup>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Parametros opticos</CardTitle>
+          <CardDescription>Estos valores alimentan el presupuesto optico.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FieldSet>
+            <FieldLegend>Equipos y fibra</FieldLegend>
+            <div className="grid gap-4 md:grid-cols-3">
+              <Field>
+                <FieldLabel htmlFor="transmitter_power_dbm">Potencia TX (dBm)</FieldLabel>
+                <Input id="transmitter_power_dbm" name="transmitter_power_dbm" type="number" step="0.001" value={state.transmitter_power_dbm} onChange={(event) => setNumber("transmitter_power_dbm", event.target.value)} required />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="receiver_sensitivity_dbm">Sensibilidad RX (dBm)</FieldLabel>
+                <Input id="receiver_sensitivity_dbm" name="receiver_sensitivity_dbm" type="number" step="0.001" value={state.receiver_sensitivity_dbm} onChange={(event) => setNumber("receiver_sensitivity_dbm", event.target.value)} required />
+              </Field>
+              <SelectField label="Tipo de fibra" value={state.fiber_type} items={FIBER_TYPES} onChange={(value) => setState({ ...state, fiber_type: value as FormState["fiber_type"] })} />
+            </div>
+            <div className="grid gap-4 md:grid-cols-4">
+              <Field>
+                <FieldLabel htmlFor="attenuation_db_per_km">Atenuacion (dB/km)</FieldLabel>
+                <Input id="attenuation_db_per_km" name="attenuation_db_per_km" type="number" step="0.0001" min="0" value={state.attenuation_db_per_km} onChange={(event) => setNumber("attenuation_db_per_km", event.target.value)} required />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="splice_count">Empalmes</FieldLabel>
+                <Input id="splice_count" name="splice_count" type="number" min="0" value={state.splice_count} onChange={(event) => setNumber("splice_count", event.target.value)} required />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="splice_loss_db">Perdida/empalme</FieldLabel>
+                <Input id="splice_loss_db" name="splice_loss_db" type="number" step="0.0001" min="0" value={state.splice_loss_db} onChange={(event) => setNumber("splice_loss_db", event.target.value)} required />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="safety_margin_db">Margen seguridad</FieldLabel>
+                <Input id="safety_margin_db" name="safety_margin_db" type="number" step="0.001" min="0" value={state.safety_margin_db} onChange={(event) => setNumber("safety_margin_db", event.target.value)} required />
+              </Field>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="connector_count">Conectores</FieldLabel>
+                <Input id="connector_count" name="connector_count" type="number" min="0" value={state.connector_count} onChange={(event) => setNumber("connector_count", event.target.value)} required />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="connector_loss_db">Perdida/conector</FieldLabel>
+                <Input id="connector_loss_db" name="connector_loss_db" type="number" step="0.0001" min="0" value={state.connector_loss_db} onChange={(event) => setNumber("connector_loss_db", event.target.value)} required />
+              </Field>
+            </div>
+          </FieldSet>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function MechanicalFields({
+  state,
+  setState,
+  setMechanicalNumber,
+}: {
+  state: FormState
+  setState: (state: FormState) => void
+  setMechanicalNumber: (key: keyof MechanicalProfile, value: string) => void
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Perfil mecanico configurable</CardTitle>
+        <CardDescription>
+          Estimacion tecnica editable. No reemplaza validacion de campo ni diseno estructural certificado.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="mechanical_profile_name">Nombre del perfil</FieldLabel>
+            <Input
+              id="mechanical_profile_name"
+              value={state.mechanical_profile.name}
+              onChange={(event) => setState({
+                ...state,
+                mechanical_profile: { ...state.mechanical_profile, name: event.target.value },
+              })}
+            />
+          </Field>
+          <div className="grid gap-4 md:grid-cols-3">
+            <Field>
+              <FieldLabel htmlFor="max_span_m">Vano maximo (m)</FieldLabel>
+              <Input id="max_span_m" type="number" min="1" value={state.mechanical_profile.max_span_m} onChange={(event) => setMechanicalNumber("max_span_m", event.target.value)} />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="reserve_percent">Reserva (%)</FieldLabel>
+              <Input id="reserve_percent" type="number" min="0" step="0.1" value={state.mechanical_profile.reserve_percent} onChange={(event) => setMechanicalNumber("reserve_percent", event.target.value)} />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="max_sag_percent">Flecha maxima (%)</FieldLabel>
+              <Input id="max_sag_percent" type="number" min="0" step="0.1" value={state.mechanical_profile.max_sag_percent} onChange={(event) => setMechanicalNumber("max_sag_percent", event.target.value)} />
+            </Field>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            <Field>
+              <FieldLabel htmlFor="cable_weight_n_per_m">Peso cable (N/m)</FieldLabel>
+              <Input id="cable_weight_n_per_m" type="number" min="0" step="0.001" value={state.mechanical_profile.cable_weight_n_per_m} onChange={(event) => setMechanicalNumber("cable_weight_n_per_m", event.target.value)} />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="installation_tension_n">Tension instalacion (N)</FieldLabel>
+              <Input id="installation_tension_n" type="number" min="1" step="1" value={state.mechanical_profile.installation_tension_n} onChange={(event) => setMechanicalNumber("installation_tension_n", event.target.value)} />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="max_tension_n">Tension maxima (N)</FieldLabel>
+              <Input id="max_tension_n" type="number" min="1" step="1" value={state.mechanical_profile.max_tension_n} onChange={(event) => setMechanicalNumber("max_tension_n", event.target.value)} />
+            </Field>
+          </div>
+        </FieldGroup>
+      </CardContent>
+    </Card>
+  )
+}
+
+function ModeButton({
+  mode,
+  current,
+  label,
+  icon: Icon,
+  onClick,
+}: {
+  mode: MapMode
+  current: MapMode
+  label: string
+  icon: typeof MapPinnedIcon
+  onClick: (mode: MapMode) => void
+}) {
+  return (
+    <Button type="button" variant={current === mode ? "default" : "outline"} onClick={() => onClick(mode)}>
+      <Icon data-icon="inline-start" />
+      {label}
+    </Button>
   )
 }
 
@@ -409,4 +798,74 @@ function SelectField({
       </Select>
     </Field>
   )
+}
+
+function kmlToGeoJson(text: string) {
+  const parser = new DOMParser()
+  const document = parser.parseFromString(text, "application/xml")
+  const placemarks = Array.from(document.querySelectorAll("Placemark"))
+  type ImportedFeature = {
+    type: "Feature"
+    properties: { name: string }
+    geometry:
+      | { type: "Point"; coordinates: number[] }
+      | { type: "LineString"; coordinates: number[][] }
+      | { type: "Polygon"; coordinates: number[][][] }
+  }
+
+  return {
+    type: "FeatureCollection",
+    features: placemarks.flatMap<ImportedFeature>((placemark) => {
+      const name = placemark.querySelector("name")?.textContent ?? "Capa KML"
+      const point = placemark.querySelector("Point coordinates")?.textContent
+      const line = placemark.querySelector("LineString coordinates")?.textContent
+      const polygon = placemark.querySelector("Polygon outerBoundaryIs LinearRing coordinates")?.textContent
+
+      if (point) {
+        return [{
+          type: "Feature" as const,
+          properties: { name },
+          geometry: { type: "Point" as const, coordinates: parseKmlCoordinate(point)[0] },
+        }]
+      }
+
+      if (line) {
+        return [{
+          type: "Feature" as const,
+          properties: { name },
+          geometry: { type: "LineString" as const, coordinates: parseKmlCoordinate(line) },
+        }]
+      }
+
+      if (polygon) {
+        return [{
+          type: "Feature" as const,
+          properties: { name },
+          geometry: { type: "Polygon" as const, coordinates: [parseKmlCoordinate(polygon)] },
+        }]
+      }
+
+      return []
+    }),
+  }
+}
+
+function parseKmlCoordinate(value: string) {
+  return value
+    .trim()
+    .split(/\s+/)
+    .map((coordinate) => {
+      const [lng, lat] = coordinate.split(",").map(Number)
+      return [lng, lat]
+    })
+    .filter(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat))
+}
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
 }

@@ -23,6 +23,9 @@ export const linkDesignSchema = z.object({
   connector_count: z.coerce.number().int().nonnegative(),
   connector_loss_db: z.coerce.number().nonnegative(),
   safety_margin_db: z.coerce.number().nonnegative(),
+  route_points: z.string().optional().default("[]"),
+  gis_layers: z.string().optional().default("[]"),
+  mechanical_profile: z.string().optional().default("{}"),
 })
 
 export type LinkDesignInput = z.infer<typeof linkDesignSchema>

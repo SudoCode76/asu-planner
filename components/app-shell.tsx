@@ -1,7 +1,10 @@
 import Link from "next/link"
 import {
   BarChart3Icon,
+  BookOpenIcon,
+  BoxesIcon,
   FileTextIcon,
+  LayersIcon,
   LogOutIcon,
   MapIcon,
   PlusIcon,
@@ -20,6 +23,9 @@ const navItems = [
   { href: "/links/new", label: "Nuevo enlace", icon: PlusIcon },
   { href: "/links", label: "Historial", icon: Rows3Icon },
   { href: "/links/compare", label: "Comparar", icon: FileTextIcon },
+  { href: "/gis/layers", label: "Capas GIS", icon: LayersIcon },
+  { href: "/assets", label: "Activos", icon: BoxesIcon },
+  { href: "/catalog", label: "Catalogo", icon: BookOpenIcon },
 ]
 
 export function AppShell({

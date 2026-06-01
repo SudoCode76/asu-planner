@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 
-import { buildDesignInsert, requireUser } from "@/lib/fibermap/data"
+import { buildDesignInsert, requireUser, syncDesignRouteTables } from "@/lib/fibermap/data"
+import type { RouteAnalysis } from "@/lib/fibermap/gis"
 import { formDataToObject, linkDesignSchema } from "@/lib/fibermap/schemas"
 import { createClient } from "@/lib/supabase/server"
 
@@ -26,6 +27,8 @@ export async function saveDesign(formData: FormData) {
   if (error || !data) {
     redirect(`/links/new?error=${encodeURIComponent(error?.message ?? "No se pudo guardar el cálculo.")}`)
   }
+
+  await syncDesignRouteTables(user.id, data.id, payload.name, payload.route_analysis as RouteAnalysis)
 
   revalidatePath("/dashboard")
   revalidatePath("/links")
@@ -57,6 +60,8 @@ export async function updateDesign(formData: FormData) {
   if (error) {
     redirect(`/links/${id}/edit?error=${encodeURIComponent(error.message)}`)
   }
+
+  await syncDesignRouteTables(user.id, id, payload.name, payload.route_analysis as RouteAnalysis)
 
   revalidatePath("/dashboard")
   revalidatePath("/links")

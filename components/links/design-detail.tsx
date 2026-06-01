@@ -10,10 +10,12 @@ import { Separator } from "@/components/ui/separator"
 import type { LinkDesign } from "@/lib/database.types"
 import { parseRecommendations } from "@/lib/fibermap/calculations"
 import { CABLE_TYPES, FIBER_TYPES } from "@/lib/fibermap/constants"
+import { analyzeRoute, buildRoutePoints, parseMechanicalProfile, parseRoutePoints, type RouteAnalysis } from "@/lib/fibermap/gis"
 
 export function DesignDetail({ design }: { design: LinkDesign }) {
   const cableType = CABLE_TYPES.find((item) => item.value === design.cable_type)?.label
   const fiberType = FIBER_TYPES.find((item) => item.value === design.fiber_type)?.label
+  const routeAnalysis = readRouteAnalysis(design)
 
   return (
     <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
@@ -72,6 +74,36 @@ export function DesignDetail({ design }: { design: LinkDesign }) {
             </ul>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Ruta GIS y vanos</CardTitle>
+            <CardDescription>Postes, distancia por tramos, reserva y advertencias mecanicas guardadas.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <div className="grid gap-3 md:grid-cols-4">
+              <Info label="Puntos" value={String(routeAnalysis.points.length)} />
+              <Info label="Tramos" value={String(routeAnalysis.spans.length)} />
+              <Info label="Cable total" value={`${routeAnalysis.total_cable_length_km.toFixed(4)} km`} />
+              <Info label="Vano maximo" value={`${routeAnalysis.max_span_m.toFixed(2)} m`} />
+            </div>
+            <div className="grid gap-2">
+              {routeAnalysis.spans.map((span) => (
+                <div key={span.index} className="rounded-lg border bg-muted/30 p-3 text-sm">
+                  <div className="flex flex-col justify-between gap-1 md:flex-row md:items-center">
+                    <p className="font-medium">{span.from_label} - {span.to_label}</p>
+                    <Badge variant={span.warnings.length ? "outline" : "secondary"}>
+                      {span.span_m.toFixed(2)} m
+                    </Badge>
+                  </div>
+                  <p className="text-muted-foreground">
+                    Flecha estimada {span.estimated_sag_m.toFixed(2)} m ({span.sag_percent.toFixed(2)}%)
+                  </p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <aside className="flex flex-col gap-6">
@@ -90,6 +122,15 @@ export function DesignDetail({ design }: { design: LinkDesign }) {
             <Info label="Perdida total" value={`${design.total_loss_db.toFixed(4)} dB`} />
             <Info label="Presupuesto optico" value={`${design.optical_budget_db.toFixed(4)} dB`} />
             <Info label="Margen final" value={`${design.final_margin_db.toFixed(4)} dB`} />
+            <Separator />
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium">Advertencias GIS</p>
+              <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-muted-foreground">
+                {routeAnalysis.warnings.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
             <Separator />
             <div className="flex flex-col gap-2">
               <Button asChild>
@@ -125,5 +166,22 @@ function Info({ label, value }: { label: string; value: string }) {
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="break-words text-sm font-medium">{value}</p>
     </div>
+  )
+}
+
+function readRouteAnalysis(design: LinkDesign): RouteAnalysis {
+  const saved = design.route_analysis
+
+  if (saved && typeof saved === "object" && "spans" in saved) {
+    return saved as unknown as RouteAnalysis
+  }
+
+  return analyzeRoute(
+    buildRoutePoints(
+      { lat: design.point_a_lat, lng: design.point_a_lng },
+      parseRoutePoints(design.route_points),
+      { lat: design.point_b_lat, lng: design.point_b_lng }
+    ),
+    parseMechanicalProfile(design.mechanical_profile)
   )
 }
