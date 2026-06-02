@@ -31,7 +31,13 @@ import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import type { LinkDesign } from "@/lib/database.types"
-import { calculateDistanceKm, calculateOpticalBudget, type Coordinate } from "@/lib/fibermap/calculations"
+import {
+  MIN_VIABLE_MARGIN_DB,
+  buildTechnicalDiagnosis,
+  calculateDistanceKm,
+  calculateOpticalBudget,
+  type Coordinate,
+} from "@/lib/fibermap/calculations"
 import { CABLE_TYPES, DEFAULT_LINK_VALUES, FIBER_TYPES, WAVELENGTHS } from "@/lib/fibermap/constants"
 import {
   DEFAULT_MECHANICAL_PROFILE,
@@ -234,6 +240,14 @@ export function LinkDesigner({
         real_distance_km: effectiveDistance,
       }),
     [state, effectiveDistance]
+  )
+  const technicalDiagnosis = useMemo(
+    () =>
+      buildTechnicalDiagnosis(result, {
+        ...state,
+        real_distance_km: effectiveDistance,
+      }),
+    [result, state, effectiveDistance]
   )
 
   const action = design ? updateDesign : saveDesign
@@ -545,7 +559,7 @@ export function LinkDesigner({
                 <TabsTrigger value="capas" className={cn(tabHasError("capas") && "text-destructive")}>Capas</TabsTrigger>
               </TabsList>
 
-              <TabsContent value="mapa" className="flex flex-col gap-4">
+              <TabsContent value="mapa" forceMount className="flex flex-col gap-4">
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" size="sm" variant={designMode === "free" ? "default" : "outline"} onClick={() => setDesignMode("free")}>
                     <MapPinnedIcon data-icon="inline-start" />
@@ -626,7 +640,7 @@ export function LinkDesigner({
                 </div>
               </TabsContent>
 
-              <TabsContent value="ruta" className="flex flex-col gap-4">
+              <TabsContent value="ruta" forceMount className="flex flex-col gap-4">
                 <div className="grid gap-3 md:grid-cols-4">
                   <Metric label="Puntos de ruta" value={String(routeAnalysis.points.length)} />
                   <Metric label="Tramos" value={String(routeAnalysis.spans.length)} />
@@ -675,15 +689,15 @@ export function LinkDesigner({
                 </div>
               </TabsContent>
 
-              <TabsContent value="optico">
+              <TabsContent value="optico" forceMount>
                 <LinkDataFields state={state} fieldErrors={fieldErrors} setState={setState} setNumber={setNumber} setRealDistance={setRealDistance} />
               </TabsContent>
 
-              <TabsContent value="mecanico">
+              <TabsContent value="mecanico" forceMount>
                 <MechanicalFields state={state} setState={setState} setMechanicalNumber={setMechanicalNumber} />
               </TabsContent>
 
-              <TabsContent value="capas" className="flex flex-col gap-4">
+              <TabsContent value="capas" forceMount className="flex flex-col gap-4">
                 <input ref={fileInputRef} type="file" accept=".geojson,.json,.kml" className="hidden" onChange={(event) => void importLayer(event)} />
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
@@ -741,10 +755,40 @@ export function LinkDesigner({
           <CardContent className="flex flex-col gap-5">
             <div className="grid gap-3">
               <Metric label="Cable total con reserva" value={`${effectiveDistance.toFixed(4)} km`} />
-              <Metric label="Perdida por distancia" value={`${result.fiber_loss_db.toFixed(4)} dB`} />
-              <Metric label="Perdida total" value={`${result.total_loss_db.toFixed(4)} dB`} />
-              <Metric label="Presupuesto optico" value={`${result.optical_budget_db.toFixed(4)} dB`} />
-              <Metric label="Margen final" value={`${result.final_margin_db.toFixed(4)} dB`} />
+              <Metric
+                label="Perdida por distancia"
+                value={`${result.fiber_loss_db.toFixed(4)} dB`}
+                detail={`${state.attenuation_db_per_km.toFixed(4)} dB/km x ${effectiveDistance.toFixed(4)} km`}
+              />
+              <Metric
+                label="Perdida total"
+                value={`${result.total_loss_db.toFixed(4)} dB`}
+                detail={`Maximo viable: ${technicalDiagnosis.max_total_loss_for_viable_db.toFixed(4)} dB`}
+                tone={technicalDiagnosis.excess_loss_db > 0 ? result.status === "non_viable" ? "destructive" : "warning" : "default"}
+              />
+              <Metric
+                label="Presupuesto optico"
+                value={`${result.optical_budget_db.toFixed(4)} dB`}
+                detail={`Requerido: ${technicalDiagnosis.required_optical_budget_db.toFixed(4)} dB`}
+                tone={technicalDiagnosis.missing_margin_db > 0 ? result.status === "non_viable" ? "destructive" : "warning" : "default"}
+              />
+              <Metric
+                label="Margen final"
+                value={`${result.final_margin_db.toFixed(4)} dB`}
+                detail={`Minimo viable: ${MIN_VIABLE_MARGIN_DB.toFixed(1)} dB`}
+                tone={result.final_margin_db < 0 ? "destructive" : result.final_margin_db < MIN_VIABLE_MARGIN_DB ? "warning" : "default"}
+              />
+            </div>
+            <Separator />
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium">Diagnostico tecnico</p>
+              <div className="rounded-lg border bg-muted/30 p-3">
+                <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-muted-foreground">
+                  {technicalDiagnosis.details.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
             </div>
             <Separator />
             <div className="flex flex-col gap-2">
@@ -992,11 +1036,32 @@ function ModeButton({
   )
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({
+  label,
+  value,
+  detail,
+  tone = "default",
+}: {
+  label: string
+  value: string
+  detail?: string
+  tone?: "default" | "warning" | "destructive"
+}) {
   return (
-    <div className="rounded-lg border bg-muted/30 p-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="truncate font-medium">{value}</p>
+    <div
+      className={cn(
+        "rounded-lg border bg-muted/30 p-3",
+        tone === "warning" && "bg-secondary/60",
+        tone === "destructive" && "border-destructive/40 bg-destructive/10"
+      )}
+    >
+      <p className={cn("text-xs text-muted-foreground", tone === "destructive" && "text-destructive")}>{label}</p>
+      <p className={cn("truncate font-medium", tone === "destructive" && "text-destructive")}>{value}</p>
+      {detail ? (
+        <p className={cn("mt-1 text-xs text-muted-foreground", tone === "destructive" && "text-destructive")}>
+          {detail}
+        </p>
+      ) : null}
     </div>
   )
 }
