@@ -142,3 +142,17 @@
   max-width: none !important;
   max-height: none !important;
 }
+
+.fiber-critical-link {
+  animation: fiber-critical-pulse 1s ease-in-out infinite;
+}
+
+@keyframes fiber-critical-pulse {
+  0%,
+  100% {
+    stroke-opacity: 0.45;
+  }
+  50% {
+    stroke-opacity: 1;
+  }
+}

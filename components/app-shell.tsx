@@ -7,6 +7,7 @@ import {
   LayersIcon,
   LogOutIcon,
   MapIcon,
+  MonitorDotIcon,
   PlusIcon,
   Rows3Icon,
 } from "lucide-react"
@@ -21,6 +22,7 @@ import type { User } from "@supabase/supabase-js"
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart3Icon },
   { href: "/links/new", label: "Nuevo enlace", icon: PlusIcon },
+  { href: "/monitoring", label: "Monitoreo Entel", icon: MonitorDotIcon },
   { href: "/links", label: "Historial", icon: Rows3Icon },
   { href: "/links/compare", label: "Comparar", icon: FileTextIcon },
   { href: "/gis/layers", label: "Capas GIS", icon: LayersIcon },

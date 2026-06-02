@@ -1,0 +1,378 @@
+export type NetworkLayer = "backbone" | "distribution"
+
+export type NetworkStatus = "ok" | "warning" | "critical" | "unknown"
+
+export type NetworkNodeType = "core" | "gateway" | "distribution"
+
+export type NetworkLinkType = "backbone" | "regional" | "international" | "distribution"
+
+export type AlarmSeverity = "info" | "minor" | "major" | "critical"
+
+export type AlarmType =
+  | "fiber_cut"
+  | "optical_degradation"
+  | "edfa_failure"
+  | "aps_switch"
+  | "latency_anomaly"
+  | "capacity_saturation"
+  | "unknown"
+
+export type LinkMetrics = {
+  txPowerDbm: number
+  rxPowerDbm: number
+  attenuationDb: number
+  latencyMs: number
+  jitterMs: number
+  packetLossPercent: number
+  trafficLoadPercent: number
+  availabilityPercent: number
+}
+
+export type LinkEquipment = {
+  vendor: string
+  model: string
+  localPort: string
+  remotePort: string
+  transceiver: string
+  edfa: "none" | "inline" | "booster" | "preamp"
+}
+
+export type TraceEvent = {
+  km: number
+  type: "connector" | "splice" | "edfa" | "reflection" | "high_loss" | "cut"
+  lossDb: number
+  status: NetworkStatus
+  description: string
+}
+
+export type LinkProtection = {
+  type: "SDH APS" | "MPLS reroute" | "No protection"
+  primaryPath: string[]
+  backupPath: string[]
+}
+
+export type TrafficProfile = {
+  normalGbps: number
+  switchedGbps: number
+  lostGbps: number
+  remainingCapacityGbps: number
+}
+
+export type NodeMetrics = {
+  latencyMs: number
+  packetLossPercent: number
+  trafficLoadPercent: number
+  availabilityPercent: number
+}
+
+export type MetricThresholds = {
+  warningRxPowerDbm: number
+  criticalRxPowerDbm: number
+  warningLatencyMs: number
+  criticalLatencyMs: number
+  warningPacketLossPercent: number
+  criticalPacketLossPercent: number
+  warningTrafficLoadPercent: number
+  criticalTrafficLoadPercent: number
+}
+
+export type EntelNode = {
+  id: string
+  name: string
+  lat: number
+  lon: number
+  layer: NetworkLayer
+  type: NetworkNodeType
+  region: string
+  parent?: string | null
+  datacenter?: boolean
+  gateway?: boolean
+  metrics: NodeMetrics
+  thresholds: Pick<
+    MetricThresholds,
+    | "warningLatencyMs"
+    | "criticalLatencyMs"
+    | "warningPacketLossPercent"
+    | "criticalPacketLossPercent"
+    | "warningTrafficLoadPercent"
+    | "criticalTrafficLoadPercent"
+  >
+}
+
+export type EntelLink = {
+  id: string
+  from: string
+  to: string
+  km: number
+  gbps: number
+  layer: NetworkLayer
+  type: NetworkLinkType
+  waypoints: [number, number][]
+  latency_ms?: number
+  note?: string
+  metrics: LinkMetrics
+  thresholds: MetricThresholds
+  equipment: LinkEquipment
+  traceEvents: TraceEvent[]
+  protection: LinkProtection
+  traffic: TrafficProfile
+}
+
+const DEFAULT_LINK_THRESHOLDS: MetricThresholds = {
+  warningRxPowerDbm: -18,
+  criticalRxPowerDbm: -24,
+  warningLatencyMs: 70,
+  criticalLatencyMs: 95,
+  warningPacketLossPercent: 1,
+  criticalPacketLossPercent: 4,
+  warningTrafficLoadPercent: 78,
+  criticalTrafficLoadPercent: 92,
+}
+
+const DEFAULT_NODE_THRESHOLDS: EntelNode["thresholds"] = {
+  warningLatencyMs: 35,
+  criticalLatencyMs: 75,
+  warningPacketLossPercent: 1,
+  criticalPacketLossPercent: 4,
+  warningTrafficLoadPercent: 80,
+  criticalTrafficLoadPercent: 94,
+}
+
+type RawNode = Omit<EntelNode, "metrics" | "thresholds" | "type" | "region" | "layer"> & {
+  layer?: NetworkLayer
+  region?: string
+  type?: NetworkNodeType
+}
+
+type RawLink = Omit<EntelLink, "equipment" | "metrics" | "protection" | "thresholds" | "traceEvents" | "traffic">
+
+function nodeMetrics(type: NetworkNodeType, datacenter = false): NodeMetrics {
+  return {
+    latencyMs: datacenter ? 6 : type === "gateway" ? 18 : 10,
+    packetLossPercent: 0.02,
+    trafficLoadPercent: datacenter ? 68 : type === "gateway" ? 55 : 42,
+    availabilityPercent: datacenter ? 99.995 : 99.98,
+  }
+}
+
+function linkMetrics(link: RawLink): LinkMetrics {
+  const baseLatency = link.latency_ms ?? Math.max(3, Math.round(link.km * 0.085 + (link.type === "international" ? 12 : link.type === "distribution" ? 2 : 3)))
+  const attenuationDb = Number((link.km * (link.type === "distribution" ? 0.018 : 0.025) + (link.type === "backbone" ? 2.2 : 1.4)).toFixed(2))
+  const txPowerDbm = link.type === "backbone" ? 1.5 : link.type === "international" ? 2 : link.type === "distribution" ? -1 : 0.5
+
+  return {
+    txPowerDbm,
+    rxPowerDbm: Number((txPowerDbm - attenuationDb).toFixed(2)),
+    attenuationDb,
+    latencyMs: baseLatency,
+    jitterMs: link.type === "international" ? 5 : link.type === "distribution" ? 1.2 : 2,
+    packetLossPercent: 0.04,
+    trafficLoadPercent: link.type === "backbone" ? 54 : link.type === "international" ? 48 : link.type === "distribution" ? 28 : 36,
+    availabilityPercent: link.type === "backbone" ? 99.99 : link.type === "distribution" ? 99.7 : 99.95,
+  }
+}
+
+function linkEquipment(link: RawLink): LinkEquipment {
+  return {
+    vendor: link.type === "backbone" ? "Huawei" : link.type === "international" ? "Nokia" : link.type === "distribution" ? "FiberHome" : "ZTE",
+    model: link.type === "backbone" ? "OSN 8800" : link.type === "international" ? "1830 PSS" : link.type === "distribution" ? "OLT AN6000" : "ZXONE 9700",
+    localPort: `${link.from.toUpperCase().slice(0, 4)}-${link.type === "distribution" ? "GPON" : "STM16"}-01`,
+    remotePort: `${link.to.toUpperCase().slice(0, 4)}-${link.type === "distribution" ? "GPON" : "STM16"}-01`,
+    transceiver: link.type === "distribution" ? "GPON Class B+ 1490/1310 nm" : link.gbps >= 2.5 ? "SFP 2.5G 1550 nm" : "SFP 1G 1310 nm",
+    edfa: link.km >= 350 ? "inline" : link.type === "international" ? "booster" : "none",
+  }
+}
+
+function traceEvents(link: RawLink): TraceEvent[] {
+  const events: TraceEvent[] = [
+    { km: 0, type: "connector", lossDb: 0.25, status: "ok", description: "Conector origen dentro de rango." },
+  ]
+
+  if (link.km > 20) {
+    events.push({
+      km: Number((link.km * 0.32).toFixed(1)),
+      type: "splice",
+      lossDb: 0.08,
+      status: "ok",
+      description: "Empalme de ruta sin perdida relevante.",
+    })
+  }
+
+  if (link.km >= 350) {
+    events.push({
+      km: Number((link.km * 0.56).toFixed(1)),
+      type: "edfa",
+      lossDb: 0,
+      status: "ok",
+      description: "Repetidor/amplificacion EDFA operativo.",
+    })
+  }
+
+  events.push({
+    km: Math.max(0, link.km),
+    type: "connector",
+    lossDb: link.type === "distribution" ? 0.18 : 0.28,
+    status: "ok",
+    description: "Conector destino dentro de rango.",
+  })
+
+  return events
+}
+
+function protection(link: RawLink): LinkProtection {
+  if (link.id === "lp_cb") {
+    return {
+      type: "SDH APS",
+      primaryPath: ["lp_cb"],
+      backupPath: ["lp_de", "aps_virtual_de_cb"],
+    }
+  }
+
+  if (link.type === "backbone") {
+    return {
+      type: "SDH APS",
+      primaryPath: [link.id],
+      backupPath: ["lp_or", "or_cb", "cb_sc"].filter((id) => id !== link.id),
+    }
+  }
+
+  if (link.type === "international") {
+    return {
+      type: "MPLS reroute",
+      primaryPath: [link.id],
+      backupPath: ["lp_de", "ro_pq", "pq_br"].filter((id) => id !== link.id),
+    }
+  }
+
+  return {
+    type: "No protection",
+    primaryPath: [link.id],
+    backupPath: [],
+  }
+}
+
+function traffic(link: RawLink): TrafficProfile {
+  const normalGbps = Number((link.gbps * (link.type === "backbone" ? 0.54 : link.type === "international" ? 0.48 : link.type === "distribution" ? 0.28 : 0.36)).toFixed(2))
+
+  return {
+    normalGbps,
+    switchedGbps: 0,
+    lostGbps: 0,
+    remainingCapacityGbps: Number((link.gbps - normalGbps).toFixed(2)),
+  }
+}
+
+function createNode(node: RawNode): EntelNode {
+  const type = node.type ?? (node.gateway ? "gateway" : node.layer === "distribution" ? "distribution" : "core")
+
+  return {
+    ...node,
+    layer: node.layer ?? "backbone",
+    region: node.region ?? (node.layer === "distribution" ? "Cochabamba Metropolitana" : "Backbone nacional"),
+    type,
+    metrics: nodeMetrics(type, node.datacenter),
+    thresholds: DEFAULT_NODE_THRESHOLDS,
+  }
+}
+
+function createLink(link: RawLink): EntelLink {
+  return {
+    ...link,
+    equipment: linkEquipment(link),
+    metrics: linkMetrics(link),
+    protection: protection(link),
+    thresholds: DEFAULT_LINK_THRESHOLDS,
+    traceEvents: traceEvents(link),
+    traffic: traffic(link),
+  }
+}
+
+export const BACKBONE_NODES: EntelNode[] = [
+  createNode({ id: "la_paz", name: "La Paz", lat: -16.4897, lon: -68.1193 }),
+  createNode({ id: "cochabamba", name: "Cochabamba", lat: -17.3895, lon: -66.1568, datacenter: true }),
+  createNode({ id: "santa_cruz", name: "Santa Cruz", lat: -17.7863, lon: -63.1812 }),
+  createNode({ id: "oruro", name: "Oruro", lat: -17.9834, lon: -67.1066 }),
+  createNode({ id: "potosi", name: "Potosi", lat: -19.5836, lon: -65.7531 }),
+  createNode({ id: "sucre", name: "Sucre", lat: -19.0434, lon: -65.2592 }),
+  createNode({ id: "tarija", name: "Tarija", lat: -21.5355, lon: -64.7296 }),
+  createNode({ id: "trinidad", name: "Trinidad", lat: -14.8333, lon: -64.9 }),
+  createNode({ id: "robore", name: "Robore", lat: -18.3333, lon: -59.75 }),
+  createNode({ id: "desaguadero", name: "Desaguadero", lat: -16.5656, lon: -69.0348, gateway: true }),
+  createNode({ id: "tambo_quemado", name: "Tambo Quemado", lat: -18.2847, lon: -69.0714, gateway: true }),
+  createNode({ id: "yacuiba", name: "Yacuiba", lat: -22.0526, lon: -63.6833, gateway: true }),
+  createNode({ id: "puerto_quijarro", name: "Puerto Quijarro", lat: -17.78, lon: -57.72, gateway: true }),
+]
+
+export const BACKBONE_LINKS: EntelLink[] = [
+  createLink({ id: "lp_or", from: "la_paz", to: "oruro", km: 230, gbps: 2.5, layer: "backbone", type: "backbone", waypoints: [[-16.4897, -68.1193], [-16.5, -68.15], [-17.2333, -67.9167], [-17.9834, -67.1066]] }),
+  createLink({ id: "lp_de", from: "la_paz", to: "desaguadero", km: 100, gbps: 2.5, layer: "backbone", type: "international", latency_ms: 55, waypoints: [[-16.4897, -68.1193], [-16.56, -68.69], [-16.5656, -69.0348]] }),
+  createLink({ id: "or_tq", from: "oruro", to: "tambo_quemado", km: 220, gbps: 1, layer: "backbone", type: "international", waypoints: [[-17.9834, -67.1066], [-18.1, -68], [-18.2847, -69.0714]] }),
+  createLink({ id: "or_cb", from: "oruro", to: "cochabamba", km: 210, gbps: 2.5, layer: "backbone", type: "backbone", waypoints: [[-17.9834, -67.1066], [-17.65, -66.95], [-17.4, -66.45], [-17.3895, -66.1568]] }),
+  createLink({ id: "lp_cb", from: "la_paz", to: "cochabamba", km: 395, gbps: 2.5, layer: "backbone", type: "backbone", waypoints: [[-16.4897, -68.1193], [-17.2333, -67.9167], [-17.9834, -67.1066], [-17.65, -66.95], [-17.3895, -66.1568]] }),
+  createLink({ id: "cb_sc", from: "cochabamba", to: "santa_cruz", km: 500, gbps: 2.5, layer: "backbone", type: "backbone", waypoints: [[-17.3895, -66.1568], [-17.3833, -66.0333], [-17.3167, -65.7667], [-16.9833, -65.4167], [-16.97, -65.15], [-17.5, -63.7], [-17.7863, -63.1812]] }),
+  createLink({ id: "cb_po", from: "cochabamba", to: "potosi", km: 320, gbps: 1, layer: "backbone", type: "regional", waypoints: [[-17.3895, -66.1568], [-17.6167, -65.8833], [-17.95, -65.5], [-18.7, -65.2], [-19.0434, -65.2592], [-19.5836, -65.7531]] }),
+  createLink({ id: "su_ta", from: "sucre", to: "tarija", km: 395, gbps: 1, layer: "backbone", type: "regional", waypoints: [[-19.0434, -65.2592], [-20, -65.2], [-21.5355, -64.7296]] }),
+  createLink({ id: "ta_ya", from: "tarija", to: "yacuiba", km: 165, gbps: 1, layer: "backbone", type: "international", waypoints: [[-21.5355, -64.7296], [-22.0526, -63.6833]] }),
+  createLink({ id: "sc_ro", from: "santa_cruz", to: "robore", km: 430, gbps: 1, layer: "backbone", type: "regional", waypoints: [[-17.7863, -63.1812], [-17.6, -62], [-18.3333, -59.75]] }),
+  createLink({ id: "ro_pq", from: "robore", to: "puerto_quijarro", km: 180, gbps: 1, layer: "backbone", type: "international", waypoints: [[-18.3333, -59.75], [-18.9667, -57.7833], [-17.78, -57.72]] }),
+  createLink({ id: "sc_tr", from: "santa_cruz", to: "trinidad", km: 600, gbps: 1, layer: "backbone", type: "regional", waypoints: [[-17.7863, -63.1812], [-15.8, -64.7], [-14.8333, -64.9]] }),
+]
+
+export const DISTRIBUTION_NODES_CBBA: EntelNode[] = [
+  createNode({ id: "cbba_central", name: "Cochabamba Centro", lat: -17.3895, lon: -66.1568, layer: "distribution", parent: null }),
+  createNode({ id: "sacaba", name: "Sacaba", lat: -17.3833, lon: -66.0333, layer: "distribution", parent: "cbba_central" }),
+  createNode({ id: "colcapirhua", name: "Colcapirhua", lat: -17.3833, lon: -66.25, layer: "distribution", parent: "cbba_central" }),
+  createNode({ id: "quillacollo", name: "Quillacollo", lat: -17.3944, lon: -66.2833, layer: "distribution", parent: "colcapirhua" }),
+  createNode({ id: "vinto", name: "Vinto", lat: -17.4, lon: -66.35, layer: "distribution", parent: "quillacollo" }),
+  createNode({ id: "sipe_sipe", name: "Sipe Sipe", lat: -17.4667, lon: -66.4167, layer: "distribution", parent: "vinto" }),
+  createNode({ id: "tiquipaya", name: "Tiquipaya", lat: -17.3333, lon: -66.2167, layer: "distribution", parent: "cbba_central" }),
+  createNode({ id: "colomi", name: "Colomi", lat: -17.3167, lon: -65.7667, layer: "distribution", parent: "sacaba" }),
+  createNode({ id: "punata", name: "Punata", lat: -17.55, lon: -65.8333, layer: "distribution", parent: "cbba_central" }),
+  createNode({ id: "cliza", name: "Cliza", lat: -17.6, lon: -65.9333, layer: "distribution", parent: "punata" }),
+  createNode({ id: "tarata", name: "Tarata", lat: -17.6167, lon: -66.0167, layer: "distribution", parent: "punata" }),
+  createNode({ id: "santivanez", name: "Santivanez (DC)", lat: -17.5492, lon: -66.2502, layer: "distribution", parent: "cbba_central", datacenter: true }),
+]
+
+const DISTRIBUTION_ROUTE_HINTS: Record<string, [number, number][]> = {
+  sacaba: [[-17.386, -66.09]],
+  colcapirhua: [[-17.386, -66.2]],
+  quillacollo: [[-17.386, -66.265]],
+  vinto: [[-17.398, -66.315]],
+  sipe_sipe: [[-17.43, -66.38]],
+  tiquipaya: [[-17.36, -66.18]],
+  colomi: [[-17.35, -65.93], [-17.33, -65.84]],
+  punata: [[-17.48, -66.05], [-17.54, -65.92]],
+  cliza: [[-17.58, -65.9]],
+  tarata: [[-17.58, -65.99]],
+  santivanez: [[-17.48, -66.2]],
+}
+
+function distributionLinkFor(node: EntelNode): EntelLink | null {
+  if (!node.parent) return null
+
+  const parent = DISTRIBUTION_NODES_CBBA.find((item) => item.id === node.parent)
+
+  if (!parent) return null
+
+  const hints = DISTRIBUTION_ROUTE_HINTS[node.id] ?? []
+  const km = Math.max(6, Math.round((Math.abs(node.lat - parent.lat) + Math.abs(node.lon - parent.lon)) * 90))
+
+  return createLink({
+    id: `dist_${parent.id}_${node.id}`,
+    from: parent.id,
+    to: node.id,
+    km,
+    gbps: node.datacenter ? 2.5 : 0.5,
+    layer: "distribution",
+    type: "distribution",
+    waypoints: [[parent.lat, parent.lon], ...hints, [node.lat, node.lon]],
+  })
+}
+
+export const DISTRIBUTION_LINKS_CBBA: EntelLink[] = DISTRIBUTION_NODES_CBBA
+  .map(distributionLinkFor)
+  .filter((link): link is EntelLink => Boolean(link))
+
+export const ENTEL_NODES: EntelNode[] = [...BACKBONE_NODES, ...DISTRIBUTION_NODES_CBBA]
+
+export const ENTEL_LINKS: EntelLink[] = [...BACKBONE_LINKS, ...DISTRIBUTION_LINKS_CBBA]
