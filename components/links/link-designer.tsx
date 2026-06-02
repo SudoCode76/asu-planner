@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic"
 import Link from "next/link"
-import { ChangeEvent, useMemo, useRef, useState } from "react"
+import { ChangeEvent, useActionState, useMemo, useRef, useState } from "react"
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -19,6 +19,7 @@ import {
 } from "lucide-react"
 
 import { saveDesign, updateDesign } from "@/app/actions/links"
+import type { DesignActionState } from "@/app/actions/links"
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -43,6 +44,8 @@ import {
   type MechanicalProfile,
   type RoutePoint,
 } from "@/lib/fibermap/gis"
+import { ENTEL_NODES } from "@/lib/fibermap/entel-network"
+import { cn } from "@/lib/utils"
 
 const LinkMap = dynamic(
   () => import("@/components/map/link-map").then((mod) => mod.LinkMap),
@@ -57,6 +60,9 @@ const LinkMap = dynamic(
 )
 
 type MapMode = "select" | "pole" | "measure" | "inspect"
+type DesignMode = "free" | "entel"
+type DemoKind = "viable" | "non_viable"
+type TabValue = "mapa" | "ruta" | "optico" | "mecanico" | "capas"
 
 type FormState = {
   name: string
@@ -84,7 +90,7 @@ type FormState = {
   mechanical_profile: MechanicalProfile
 }
 
-const DEMO_LINK_STATE: FormState = {
+const DEMO_BASE_STATE: FormState = {
   name: "Enlace demo ASU - Zona urbana",
   description: "Diseno de prueba con postes intermedios para validar calculos GIS, mecanicos y presupuesto optico.",
   origin_name: "Nodo Central",
@@ -113,6 +119,61 @@ const DEMO_LINK_STATE: FormState = {
   gis_layers: [],
   mechanical_profile: DEFAULT_MECHANICAL_PROFILE,
 }
+
+const DEMO_LINK_STATES: Record<DemoKind, FormState> = {
+  viable: {
+    ...DEMO_BASE_STATE,
+    name: "Demo viable ASU - Zona urbana",
+    description: "Caso demo con margen optico holgado para validar un enlace viable.",
+    transmitter_power_dbm: 3,
+    receiver_sensitivity_dbm: -24,
+    attenuation_db_per_km: 0.22,
+    splice_count: 6,
+    splice_loss_db: 0.1,
+    connector_count: 4,
+    connector_loss_db: 0.3,
+    safety_margin_db: 3,
+  },
+  non_viable: {
+    ...DEMO_BASE_STATE,
+    name: "Demo no viable ASU - Zona urbana",
+    description: "Caso demo con presupuesto optico insuficiente para validar un enlace no viable.",
+    transmitter_power_dbm: -5,
+    receiver_sensitivity_dbm: -15,
+    attenuation_db_per_km: 0.5,
+    splice_count: 20,
+    splice_loss_db: 0.2,
+    connector_count: 8,
+    connector_loss_db: 0.5,
+    safety_margin_db: 3,
+  },
+}
+
+const FIELD_TABS: Record<string, TabValue> = {
+  name: "optico",
+  real_distance_km: "optico",
+  cable_type: "optico",
+  fiber_strands: "optico",
+  wavelength_nm: "optico",
+  fiber_type: "optico",
+  transmitter_power_dbm: "optico",
+  receiver_sensitivity_dbm: "optico",
+  attenuation_db_per_km: "optico",
+  splice_count: "optico",
+  splice_loss_db: "optico",
+  connector_count: "optico",
+  connector_loss_db: "optico",
+  safety_margin_db: "optico",
+  point_a: "mapa",
+  point_a_lat: "mapa",
+  point_a_lng: "mapa",
+  point_b: "mapa",
+  point_b_lat: "mapa",
+  point_b_lng: "mapa",
+  map_distance_km: "mapa",
+}
+
+const EMPTY_ACTION_STATE: DesignActionState = { status: "idle" }
 
 function initialState(design?: LinkDesign): FormState {
   return {
@@ -152,6 +213,10 @@ export function LinkDesigner({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [state, setState] = useState<FormState>(() => initialState(design))
   const [mapMode, setMapMode] = useState<MapMode>("select")
+  const [designMode, setDesignMode] = useState<DesignMode>("free")
+  const [activeTab, setActiveTab] = useState<TabValue>("mapa")
+  const [selectedDemo, setSelectedDemo] = useState<DemoKind | "">("")
+  const [selectedEntelNodeId, setSelectedEntelNodeId] = useState<string | undefined>(undefined)
   const [realDistanceEdited, setRealDistanceEdited] = useState(false)
 
   const routeAnalysis = useMemo(() => {
@@ -172,6 +237,85 @@ export function LinkDesigner({
   )
 
   const action = design ? updateDesign : saveDesign
+  const [actionState, formAction, isPending] = useActionState(action, EMPTY_ACTION_STATE)
+  const fieldErrors = actionState.fieldErrors ?? {}
+  const errorEntries = Object.entries(fieldErrors)
+  const hasActionError = actionState.status === "error"
+  const legacyErrorState = error
+    ? { status: "error" as const, message: error, fieldErrors: {} }
+    : null
+  const visibleError = hasActionError ? actionState : legacyErrorState
+  const mapErrorMessages = Array.from(new Set([
+    ...(fieldErrors.point_a ?? []),
+    ...(fieldErrors.point_a_lat ?? []),
+    ...(fieldErrors.point_a_lng ?? []),
+    ...(fieldErrors.point_b ?? []),
+    ...(fieldErrors.point_b_lat ?? []),
+    ...(fieldErrors.point_b_lng ?? []),
+    ...(fieldErrors.map_distance_km ?? []),
+  ]))
+
+  function getEntelNode(id: string) {
+    return ENTEL_NODES.find((node) => node.id === id)
+  }
+
+  function applyEntelNodeSelect(nodeId: string) {
+    const node = getEntelNode(nodeId)
+    if (!node) return
+
+    const nodeCoordinate = { lat: node.lat, lng: node.lon }
+
+    if (mapMode === "pole") {
+      if (!state.pointA) return
+
+      setState((current) => ({
+        ...current,
+        route_points: [
+          ...current.route_points,
+          {
+            ...nodeCoordinate,
+            id: `entel-pole-${node.id}-${Date.now()}`,
+            kind: "pole",
+            label: node.name,
+          },
+        ],
+      }))
+      return
+    }
+
+    if (mapMode !== "select") return
+
+    setDesignMode("entel")
+    setRealDistanceEdited(false)
+    setState((current) => {
+      if (!current.pointA || current.pointB) {
+        setSelectedEntelNodeId(node.id)
+
+        return {
+          ...current,
+          name: current.name || `Enlace Entel ${node.name} - nuevo destino`,
+          description: current.description || `Diseno iniciado desde el nodo ${node.name} de la red Entel Bolivia hacia un nuevo punto.`,
+          origin_name: node.name,
+          destination_name: current.destination_name && current.destination_name !== node.name ? current.destination_name : "",
+          pointA: nodeCoordinate,
+          pointB: null,
+          map_distance_km: 0,
+          real_distance_km: 0,
+          route_points: [],
+        }
+      }
+
+      const distance = calculateDistanceKm(current.pointA, nodeCoordinate)
+
+      return {
+        ...current,
+        destination_name: node.name,
+        pointB: nodeCoordinate,
+        map_distance_km: distance,
+        real_distance_km: current.real_distance_km > distance ? current.real_distance_km : distance,
+      }
+    })
+  }
 
   function setNumber(key: keyof FormState, value: string) {
     setState((current) => ({ ...current, [key]: Number(value) }))
@@ -210,10 +354,14 @@ export function LinkDesigner({
           ? current.real_distance_km
           : distance,
     }))
+    if (designMode !== "entel" || !pointA) {
+      setSelectedEntelNodeId(undefined)
+    }
   }
 
   function clearPoints() {
     setRealDistanceEdited(false)
+    setSelectedEntelNodeId(undefined)
     setState((current) => ({
       ...current,
       pointA: null,
@@ -224,15 +372,20 @@ export function LinkDesigner({
     }))
   }
 
-  function fillDemoData() {
+  function fillDemoData(kind: DemoKind) {
+    const demoState = DEMO_LINK_STATES[kind]
     const mapDistance = calculateDistanceKm(
-      DEMO_LINK_STATE.pointA as Coordinate,
-      DEMO_LINK_STATE.pointB as Coordinate
+      demoState.pointA as Coordinate,
+      demoState.pointB as Coordinate
     )
 
+    setSelectedDemo(kind)
     setRealDistanceEdited(false)
+    setDesignMode("free")
+    setActiveTab("mapa")
+    setSelectedEntelNodeId(undefined)
     setState({
-      ...DEMO_LINK_STATE,
+      ...demoState,
       map_distance_km: mapDistance,
     })
   }
@@ -322,8 +475,23 @@ export function LinkDesigner({
     event.target.value = ""
   }
 
+  function tabHasError(tab: TabValue) {
+    return Object.keys(fieldErrors).some((field) => (FIELD_TABS[field] ?? "optico") === tab)
+  }
+
+  function focusFirstIncompleteSection() {
+    if (!state.pointA || !state.pointB) {
+      setActiveTab("mapa")
+      return
+    }
+
+    if (!state.name.trim() || effectiveDistance <= 0) {
+      setActiveTab("optico")
+    }
+  }
+
   return (
-    <form action={action} className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
+    <form action={formAction} noValidate onSubmit={focusFirstIncompleteSection} className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
       {design ? <input type="hidden" name="id" value={design.id} /> : null}
       <input type="hidden" name="point_a_lat" value={state.pointA?.lat ?? ""} />
       <input type="hidden" name="point_a_lng" value={state.pointA?.lng ?? ""} />
@@ -338,10 +506,19 @@ export function LinkDesigner({
       <input type="hidden" name="fiber_type" value={state.fiber_type} />
 
       <div className="flex flex-col gap-6">
-        {error ? (
-          <p className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-            {error}
-          </p>
+        {visibleError ? (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+            <p className="font-medium">{visibleError.message}</p>
+            {errorEntries.length ? (
+              <ul className="mt-2 flex list-disc flex-col gap-1 pl-5">
+                {errorEntries.flatMap(([field, messages]) =>
+                  messages.map((message) => (
+                    <li key={`${field}-${message}`}>{message}</li>
+                  ))
+                )}
+              </ul>
+            ) : null}
+          </div>
         ) : null}
 
         <Card className="overflow-hidden">
@@ -359,16 +536,34 @@ export function LinkDesigner({
             </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            <Tabs defaultValue="mapa" className="flex flex-col gap-4">
+            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabValue)} className="flex flex-col gap-4">
               <TabsList className="grid w-full grid-cols-5">
-                <TabsTrigger value="mapa">Mapa</TabsTrigger>
-                <TabsTrigger value="ruta">Ruta</TabsTrigger>
-                <TabsTrigger value="optico">Optico</TabsTrigger>
-                <TabsTrigger value="mecanico">Mecanico</TabsTrigger>
-                <TabsTrigger value="capas">Capas</TabsTrigger>
+                <TabsTrigger value="mapa" className={cn(tabHasError("mapa") && "text-destructive")}>Mapa</TabsTrigger>
+                <TabsTrigger value="ruta" className={cn(tabHasError("ruta") && "text-destructive")}>Ruta</TabsTrigger>
+                <TabsTrigger value="optico" className={cn(tabHasError("optico") && "text-destructive")}>Optico</TabsTrigger>
+                <TabsTrigger value="mecanico" className={cn(tabHasError("mecanico") && "text-destructive")}>Mecanico</TabsTrigger>
+                <TabsTrigger value="capas" className={cn(tabHasError("capas") && "text-destructive")}>Capas</TabsTrigger>
               </TabsList>
 
               <TabsContent value="mapa" className="flex flex-col gap-4">
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" size="sm" variant={designMode === "free" ? "default" : "outline"} onClick={() => setDesignMode("free")}>
+                    <MapPinnedIcon data-icon="inline-start" />
+                    Diseno libre
+                  </Button>
+                  <Button type="button" size="sm" variant={designMode === "entel" ? "default" : "outline"} onClick={() => {
+                    setDesignMode("entel")
+                    setMapMode("select")
+                  }}>
+                    <RouteIcon data-icon="inline-start" />
+                    Desde red Entel
+                  </Button>
+                </div>
+                {designMode === "entel" ? (
+                  <div className="rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                    Modo red Entel: usa A/B para seleccionar nodos o puntos del mapa, y Postes para agregar apoyos intermedios.
+                  </div>
+                ) : null}
                 <div className="flex flex-wrap gap-2">
                   <ModeButton mode="select" current={mapMode} onClick={setMapMode} label="A/B" icon={MapPinnedIcon} />
                   <ModeButton mode="pole" current={mapMode} onClick={setMapMode} label="Postes" icon={PlusIcon} />
@@ -378,30 +573,52 @@ export function LinkDesigner({
                 <div className="rounded-xl border bg-muted/40 p-1 shadow-sm">
                   <div className="overflow-hidden rounded-lg border bg-background">
                     <LinkMap
+                      designMode={designMode}
                       pointA={state.pointA}
                       pointB={state.pointB}
                       mode={mapMode}
                       routePoints={state.route_points}
                       gisLayers={state.gis_layers}
+                      selectedEntelNodeId={selectedEntelNodeId}
                       onChange={setPoints}
+                      onEntelOriginSelect={applyEntelNodeSelect}
                       onRoutePointsChange={(points) => setState((current) => ({ ...current, route_points: points }))}
                     />
                   </div>
                 </div>
                 <div className="grid gap-3 md:grid-cols-3">
-                  <Metric label="Punto A" value={state.pointA ? `${state.pointA.lat}, ${state.pointA.lng}` : "Haz clic en el mapa"} />
-                  <Metric label="Punto B" value={state.pointB ? `${state.pointB.lat}, ${state.pointB.lng}` : state.pointA ? "Haz clic para cerrar el enlace" : "Pendiente"} />
+                  <Metric label="Punto A" value={state.pointA ? `${state.pointA.lat}, ${state.pointA.lng}` : designMode === "entel" ? "Selecciona un nodo Entel" : "Haz clic en el mapa"} />
+                  <Metric label="Punto B" value={state.pointB ? `${state.pointB.lat}, ${state.pointB.lng}` : state.pointA ? "Haz clic para elegir destino" : "Pendiente"} />
                   <Metric label="Distancia por ruta" value={`${routeAnalysis.total_cable_length_km.toFixed(4)} km`} />
                 </div>
+                {mapErrorMessages.length ? (
+                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                    <ul className="flex list-disc flex-col gap-1 pl-5">
+                      {mapErrorMessages.map((message) => (
+                        <li key={message}>{message}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" variant="outline" onClick={clearPoints}>
                     <EraserIcon data-icon="inline-start" />
                     Limpiar puntos
                   </Button>
-                  <Button type="button" variant="secondary" onClick={fillDemoData}>
-                    <SparklesIcon data-icon="inline-start" />
-                    Autocompletar demo
-                  </Button>
+                  <div className="min-w-[220px]">
+                    <Select value={selectedDemo} onValueChange={(value) => fillDemoData(value as DemoKind)}>
+                      <SelectTrigger className="w-full">
+                        <SparklesIcon data-icon="inline-start" />
+                        <SelectValue placeholder="Autocompletar demo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="viable">Demo viable</SelectItem>
+                          <SelectItem value="non_viable">Demo no viable</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <Button type="button" variant="outline" onClick={exportGeoJson}>
                     <DownloadIcon data-icon="inline-start" />
                     Exportar GeoJSON
@@ -459,7 +676,7 @@ export function LinkDesigner({
               </TabsContent>
 
               <TabsContent value="optico">
-                <LinkDataFields state={state} setState={setState} setNumber={setNumber} setRealDistance={setRealDistance} />
+                <LinkDataFields state={state} fieldErrors={fieldErrors} setState={setState} setNumber={setNumber} setRealDistance={setRealDistance} />
               </TabsContent>
 
               <TabsContent value="mecanico">
@@ -548,9 +765,9 @@ export function LinkDesigner({
               </ul>
             </div>
             <div className="flex flex-col gap-2">
-              <Button disabled={!state.pointA || !state.pointB}>
+              <Button type="submit" disabled={isPending}>
                 <SaveIcon data-icon="inline-start" />
-                {design ? "Actualizar calculo" : "Guardar calculo"}
+                {isPending ? "Guardando..." : design ? "Actualizar calculo" : "Guardar calculo"}
               </Button>
               <Button variant="outline" asChild>
                 <Link href="/links">Volver al historial</Link>
@@ -565,15 +782,19 @@ export function LinkDesigner({
 
 function LinkDataFields({
   state,
+  fieldErrors,
   setState,
   setNumber,
   setRealDistance,
 }: {
   state: FormState
+  fieldErrors: Record<string, string[]>
   setState: (state: FormState) => void
   setNumber: (key: keyof FormState, value: string) => void
   setRealDistance: (value: string) => void
 }) {
+  const errorFor = (field: string) => fieldErrors[field]?.[0]
+
   return (
     <div className="flex flex-col gap-6">
       <Card>
@@ -584,14 +805,15 @@ function LinkDataFields({
         <CardContent>
           <FieldGroup>
             <div className="grid gap-4 md:grid-cols-2">
-              <Field>
+              <Field data-invalid={!!errorFor("name")}>
                 <FieldLabel htmlFor="name">Nombre del enlace</FieldLabel>
-                <Input id="name" name="name" value={state.name} onChange={(event) => setState({ ...state, name: event.target.value })} required />
+                <Input id="name" name="name" value={state.name} onChange={(event) => setState({ ...state, name: event.target.value })} aria-invalid={!!errorFor("name")} required />
+                {errorFor("name") ? <FieldDescription>{errorFor("name")}</FieldDescription> : null}
               </Field>
-              <Field>
+              <Field data-invalid={!!errorFor("real_distance_km")}>
                 <FieldLabel htmlFor="real_distance_km">Distancia manual de cable (km)</FieldLabel>
-                <Input id="real_distance_km" name="real_distance_km" type="number" step="0.0001" min="0.0001" value={state.real_distance_km} onChange={(event) => setRealDistance(event.target.value)} required />
-                <FieldDescription>Si hay postes, el servidor prioriza la distancia por ruta con reserva.</FieldDescription>
+                <Input id="real_distance_km" name="real_distance_km" type="number" step="0.0001" min="0.0001" value={state.real_distance_km} onChange={(event) => setRealDistance(event.target.value)} aria-invalid={!!errorFor("real_distance_km")} required />
+                <FieldDescription>{errorFor("real_distance_km") ?? "Si hay postes, el servidor prioriza la distancia por ruta con reserva."}</FieldDescription>
               </Field>
             </div>
             <Field>
@@ -609,12 +831,13 @@ function LinkDataFields({
               </Field>
             </div>
             <div className="grid gap-4 md:grid-cols-3">
-              <SelectField label="Tipo de cable" value={state.cable_type} items={CABLE_TYPES} onChange={(value) => setState({ ...state, cable_type: value as FormState["cable_type"] })} />
-              <Field>
+              <SelectField label="Tipo de cable" value={state.cable_type} items={CABLE_TYPES} error={errorFor("cable_type")} onChange={(value) => setState({ ...state, cable_type: value as FormState["cable_type"] })} />
+              <Field data-invalid={!!errorFor("fiber_strands")}>
                 <FieldLabel htmlFor="fiber_strands">Hilos</FieldLabel>
-                <Input id="fiber_strands" name="fiber_strands" type="number" min="1" value={state.fiber_strands} onChange={(event) => setNumber("fiber_strands", event.target.value)} required />
+                <Input id="fiber_strands" name="fiber_strands" type="number" min="1" value={state.fiber_strands} onChange={(event) => setNumber("fiber_strands", event.target.value)} aria-invalid={!!errorFor("fiber_strands")} required />
+                {errorFor("fiber_strands") ? <FieldDescription>{errorFor("fiber_strands")}</FieldDescription> : null}
               </Field>
-              <SelectField label="Longitud de onda" value={String(state.wavelength_nm)} items={WAVELENGTHS.map((item) => ({ value: String(item.value), label: item.label }))} onChange={(value) => setState({ ...state, wavelength_nm: Number(value) as 1310 | 1550 })} />
+              <SelectField label="Longitud de onda" value={String(state.wavelength_nm)} items={WAVELENGTHS.map((item) => ({ value: String(item.value), label: item.label }))} error={errorFor("wavelength_nm")} onChange={(value) => setState({ ...state, wavelength_nm: Number(value) as 1310 | 1550 })} />
             </div>
           </FieldGroup>
         </CardContent>
@@ -629,42 +852,50 @@ function LinkDataFields({
           <FieldSet>
             <FieldLegend>Equipos y fibra</FieldLegend>
             <div className="grid gap-4 md:grid-cols-3">
-              <Field>
+              <Field data-invalid={!!errorFor("transmitter_power_dbm")}>
                 <FieldLabel htmlFor="transmitter_power_dbm">Potencia TX (dBm)</FieldLabel>
-                <Input id="transmitter_power_dbm" name="transmitter_power_dbm" type="number" step="0.001" value={state.transmitter_power_dbm} onChange={(event) => setNumber("transmitter_power_dbm", event.target.value)} required />
+                <Input id="transmitter_power_dbm" name="transmitter_power_dbm" type="number" step="0.001" value={state.transmitter_power_dbm} onChange={(event) => setNumber("transmitter_power_dbm", event.target.value)} aria-invalid={!!errorFor("transmitter_power_dbm")} required />
+                {errorFor("transmitter_power_dbm") ? <FieldDescription>{errorFor("transmitter_power_dbm")}</FieldDescription> : null}
               </Field>
-              <Field>
+              <Field data-invalid={!!errorFor("receiver_sensitivity_dbm")}>
                 <FieldLabel htmlFor="receiver_sensitivity_dbm">Sensibilidad RX (dBm)</FieldLabel>
-                <Input id="receiver_sensitivity_dbm" name="receiver_sensitivity_dbm" type="number" step="0.001" value={state.receiver_sensitivity_dbm} onChange={(event) => setNumber("receiver_sensitivity_dbm", event.target.value)} required />
+                <Input id="receiver_sensitivity_dbm" name="receiver_sensitivity_dbm" type="number" step="0.001" value={state.receiver_sensitivity_dbm} onChange={(event) => setNumber("receiver_sensitivity_dbm", event.target.value)} aria-invalid={!!errorFor("receiver_sensitivity_dbm")} required />
+                {errorFor("receiver_sensitivity_dbm") ? <FieldDescription>{errorFor("receiver_sensitivity_dbm")}</FieldDescription> : null}
               </Field>
-              <SelectField label="Tipo de fibra" value={state.fiber_type} items={FIBER_TYPES} onChange={(value) => setState({ ...state, fiber_type: value as FormState["fiber_type"] })} />
+              <SelectField label="Tipo de fibra" value={state.fiber_type} items={FIBER_TYPES} error={errorFor("fiber_type")} onChange={(value) => setState({ ...state, fiber_type: value as FormState["fiber_type"] })} />
             </div>
             <div className="grid gap-4 md:grid-cols-4">
-              <Field>
+              <Field data-invalid={!!errorFor("attenuation_db_per_km")}>
                 <FieldLabel htmlFor="attenuation_db_per_km">Atenuacion (dB/km)</FieldLabel>
-                <Input id="attenuation_db_per_km" name="attenuation_db_per_km" type="number" step="0.0001" min="0" value={state.attenuation_db_per_km} onChange={(event) => setNumber("attenuation_db_per_km", event.target.value)} required />
+                <Input id="attenuation_db_per_km" name="attenuation_db_per_km" type="number" step="0.0001" min="0" value={state.attenuation_db_per_km} onChange={(event) => setNumber("attenuation_db_per_km", event.target.value)} aria-invalid={!!errorFor("attenuation_db_per_km")} required />
+                {errorFor("attenuation_db_per_km") ? <FieldDescription>{errorFor("attenuation_db_per_km")}</FieldDescription> : null}
               </Field>
-              <Field>
+              <Field data-invalid={!!errorFor("splice_count")}>
                 <FieldLabel htmlFor="splice_count">Empalmes</FieldLabel>
-                <Input id="splice_count" name="splice_count" type="number" min="0" value={state.splice_count} onChange={(event) => setNumber("splice_count", event.target.value)} required />
+                <Input id="splice_count" name="splice_count" type="number" min="0" value={state.splice_count} onChange={(event) => setNumber("splice_count", event.target.value)} aria-invalid={!!errorFor("splice_count")} required />
+                {errorFor("splice_count") ? <FieldDescription>{errorFor("splice_count")}</FieldDescription> : null}
               </Field>
-              <Field>
+              <Field data-invalid={!!errorFor("splice_loss_db")}>
                 <FieldLabel htmlFor="splice_loss_db">Perdida/empalme</FieldLabel>
-                <Input id="splice_loss_db" name="splice_loss_db" type="number" step="0.0001" min="0" value={state.splice_loss_db} onChange={(event) => setNumber("splice_loss_db", event.target.value)} required />
+                <Input id="splice_loss_db" name="splice_loss_db" type="number" step="0.0001" min="0" value={state.splice_loss_db} onChange={(event) => setNumber("splice_loss_db", event.target.value)} aria-invalid={!!errorFor("splice_loss_db")} required />
+                {errorFor("splice_loss_db") ? <FieldDescription>{errorFor("splice_loss_db")}</FieldDescription> : null}
               </Field>
-              <Field>
+              <Field data-invalid={!!errorFor("safety_margin_db")}>
                 <FieldLabel htmlFor="safety_margin_db">Margen seguridad</FieldLabel>
-                <Input id="safety_margin_db" name="safety_margin_db" type="number" step="0.001" min="0" value={state.safety_margin_db} onChange={(event) => setNumber("safety_margin_db", event.target.value)} required />
+                <Input id="safety_margin_db" name="safety_margin_db" type="number" step="0.001" min="0" value={state.safety_margin_db} onChange={(event) => setNumber("safety_margin_db", event.target.value)} aria-invalid={!!errorFor("safety_margin_db")} required />
+                {errorFor("safety_margin_db") ? <FieldDescription>{errorFor("safety_margin_db")}</FieldDescription> : null}
               </Field>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
-              <Field>
+              <Field data-invalid={!!errorFor("connector_count")}>
                 <FieldLabel htmlFor="connector_count">Conectores</FieldLabel>
-                <Input id="connector_count" name="connector_count" type="number" min="0" value={state.connector_count} onChange={(event) => setNumber("connector_count", event.target.value)} required />
+                <Input id="connector_count" name="connector_count" type="number" min="0" value={state.connector_count} onChange={(event) => setNumber("connector_count", event.target.value)} aria-invalid={!!errorFor("connector_count")} required />
+                {errorFor("connector_count") ? <FieldDescription>{errorFor("connector_count")}</FieldDescription> : null}
               </Field>
-              <Field>
+              <Field data-invalid={!!errorFor("connector_loss_db")}>
                 <FieldLabel htmlFor="connector_loss_db">Perdida/conector</FieldLabel>
-                <Input id="connector_loss_db" name="connector_loss_db" type="number" step="0.0001" min="0" value={state.connector_loss_db} onChange={(event) => setNumber("connector_loss_db", event.target.value)} required />
+                <Input id="connector_loss_db" name="connector_loss_db" type="number" step="0.0001" min="0" value={state.connector_loss_db} onChange={(event) => setNumber("connector_loss_db", event.target.value)} aria-invalid={!!errorFor("connector_loss_db")} required />
+                {errorFor("connector_loss_db") ? <FieldDescription>{errorFor("connector_loss_db")}</FieldDescription> : null}
               </Field>
             </div>
           </FieldSet>
@@ -744,15 +975,17 @@ function ModeButton({
   label,
   icon: Icon,
   onClick,
+  disabled = false,
 }: {
   mode: MapMode
   current: MapMode
   label: string
   icon: typeof MapPinnedIcon
   onClick: (mode: MapMode) => void
+  disabled?: boolean
 }) {
   return (
-    <Button type="button" variant={current === mode ? "default" : "outline"} onClick={() => onClick(mode)}>
+    <Button type="button" variant={current === mode ? "default" : "outline"} disabled={disabled} onClick={() => onClick(mode)}>
       <Icon data-icon="inline-start" />
       {label}
     </Button>
@@ -772,18 +1005,20 @@ function SelectField({
   label,
   value,
   items,
+  error,
   onChange,
 }: {
   label: string
   value: string
   items: readonly { value: string; label: string }[]
+  error?: string
   onChange: (value: string) => void
 }) {
   return (
-    <Field>
+    <Field data-invalid={!!error}>
       <FieldLabel>{label}</FieldLabel>
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="w-full">
+        <SelectTrigger className="w-full" aria-invalid={!!error}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -796,6 +1031,7 @@ function SelectField({
           </SelectGroup>
         </SelectContent>
       </Select>
+      {error ? <FieldDescription>{error}</FieldDescription> : null}
     </Field>
   )
 }

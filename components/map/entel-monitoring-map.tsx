@@ -37,6 +37,7 @@ import {
   type NodeMetrics,
   type TraceEvent,
 } from "@/lib/fibermap/entel-network"
+import { getEntelCachedRoute } from "@/lib/fibermap/entel-route-cache"
 import { cn } from "@/lib/utils"
 
 type AlarmRecord = {
@@ -86,7 +87,7 @@ type Scenario = {
 
 type RouteRequestState = "loading" | "error"
 
-type RouteSource = "osrm" | "fallback"
+type RouteSource = "mapbox" | "cache" | "fallback"
 
 type RoutingProxyResponse = {
   path?: [number, number][]
@@ -94,7 +95,16 @@ type RoutingProxyResponse = {
   error?: string
 }
 
+type RoutingHealth = {
+  configured: boolean
+  provider: "mapbox"
+}
+
+type RoutingLastResponse = "idle" | "ok" | "error"
+
 const NETWORK_CENTER: [number, number] = [-17.9, -64.4]
+const ROUTING_CLIENT_TIMEOUT_MS = 15000
+const ROUTING_BATCH_SIZE = 3
 
 const STATUS_META: Record<NetworkStatus, { label: string; color: string; className: string }> = {
   ok: { label: "Operativo", color: "#16a34a", className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" },
@@ -379,16 +389,44 @@ function getLinkName(link: EntelLink) {
   return `${getNode(link.from).name} -> ${getNode(link.to).name}`
 }
 
-async function fetchOsrmRoute(link: EntelLink) {
-  const response = await fetch("/api/routing/osrm", {
-    body: JSON.stringify({ points: link.waypoints }),
+function compactRoutePoints(points: [number, number][], maxPoints = 25) {
+  if (points.length <= maxPoints) return points
+
+  const compacted: [number, number][] = []
+  const step = (points.length - 1) / (maxPoints - 1)
+
+  for (let index = 0; index < maxPoints; index += 1) {
+    compacted.push(points[Math.round(index * step)])
+  }
+
+  return compacted
+}
+
+function getRoutingControlPoints(link: EntelLink) {
+  return compactRoutePoints(link.waypoints.length >= 2 ? link.waypoints : getEntelCachedRoute(link.id) ?? link.path ?? link.waypoints)
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = ROUTING_CLIENT_TIMEOUT_MS) {
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal })
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
+async function fetchMapboxRoute(link: EntelLink) {
+  const response = await fetchWithTimeout("/api/routing/mapbox", {
+    body: JSON.stringify({ points: getRoutingControlPoints(link) }),
     headers: { "Content-Type": "application/json" },
     method: "POST",
   })
   const data = await response.json() as RoutingProxyResponse
 
-  if (!response.ok || data.source !== "osrm" || !data.path?.length) {
-    throw new Error(data.error ?? `OSRM HTTP ${response.status}`)
+  if (!response.ok || !data.path?.length) {
+    throw new Error(data.error ?? `Mapbox HTTP ${response.status}`)
   }
 
   return data.path
@@ -399,13 +437,17 @@ function wait(ms: number) {
 }
 
 function getLinkPositions(link: EntelLink, resolvedRoutePaths: Record<string, [number, number][]>) {
-  return resolvedRoutePaths[link.id] ?? link.path ?? link.waypoints
+  return resolvedRoutePaths[link.id] ?? getEntelCachedRoute(link.id) ?? link.path ?? link.waypoints
 }
 
-function getRouteDashArray(link: EntelLink, source: RouteSource | undefined, isReroute: boolean) {
-  if (source !== "osrm") return "3 7"
+function getRouteSource(link: EntelLink, routeSource: Record<string, RouteSource>) {
+  return routeSource[link.id] ?? (getEntelCachedRoute(link.id) ? "cache" : "fallback")
+}
+
+function getRouteDashArray(link: EntelLink, isReroute: boolean, source: RouteSource) {
   if (link.type === "international") return "8 8"
   if (isReroute) return "12 6"
+  if (source !== "mapbox") return "10 6"
 
   return undefined
 }
@@ -555,6 +597,9 @@ export function EntelMonitoringMap() {
   const [routeRequestState, setRouteRequestState] = useState<Record<string, RouteRequestState>>({})
   const [routeSource, setRouteSource] = useState<Record<string, RouteSource>>({})
   const [routingError, setRoutingError] = useState<string | null>(null)
+  const [routingHealth, setRoutingHealth] = useState<RoutingHealth | null>(null)
+  const [routingHealthError, setRoutingHealthError] = useState<string | null>(null)
+  const [routingLastResponse, setRoutingLastResponse] = useState<RoutingLastResponse>("idle")
   const [routingRetryNonce, setRoutingRetryNonce] = useState(0)
   const resolvedRoutePathsRef = useRef<Record<string, [number, number][]>>({})
   const routeSourceRef = useRef<Record<string, RouteSource>>({})
@@ -580,6 +625,33 @@ export function EntelMonitoringMap() {
     return () => {
       isMountedRef.current = false
     }
+  }, [])
+
+  useEffect(() => {
+    async function checkRoutingHealth() {
+      try {
+        const response = await fetchWithTimeout("/api/routing/mapbox", {}, 6000)
+        const contentType = response.headers.get("content-type") ?? ""
+
+        if (!contentType.includes("application/json")) {
+          throw new Error("Mapbox bloqueado por auth o respuesta no JSON")
+        }
+
+        const data = await response.json() as RoutingHealth
+
+        if (!isMountedRef.current) return
+
+        setRoutingHealth(data)
+        setRoutingHealthError(null)
+      } catch (error) {
+        if (!isMountedRef.current) return
+
+        setRoutingHealth(null)
+        setRoutingHealthError(error instanceof Error ? error.message : "No se pudo diagnosticar Mapbox")
+      }
+    }
+
+    void checkRoutingHealth()
   }, [])
 
   const linkTelemetry = useMemo(() => {
@@ -610,6 +682,9 @@ export function EntelMonitoringMap() {
   const activeScenarioIds = new Set(activeAlarms.map((alarm) => alarm.scenarioId))
   const highlightedLinks = new Set(activeAlarms.flatMap((alarm) => [...alarm.affectedLinks, ...(alarm.rerouteLinks ?? [])]))
   const activeOverlayLinks = ENTEL_LINKS.filter((link) => highlightedLinks.has(link.id))
+  const activeImpactAlarm = activeAlarms[0]
+  const activeImpactLink = activeImpactAlarm ? ENTEL_LINKS.find((link) => activeImpactAlarm.affectedLinks.includes(link.id)) : null
+  const activeImpactTelemetry = activeImpactLink ? linkTelemetry[activeImpactLink.id] : null
   const activeNodes = Object.values(nodeTelemetry).filter(({ status }) => status !== "critical" && status !== "unknown").length
   const okLinks = Object.values(linkTelemetry).filter(({ status }) => status === "ok").length
   const criticalLinks = Object.values(linkTelemetry).filter(({ status }) => status === "critical").length
@@ -634,11 +709,19 @@ export function EntelMonitoringMap() {
   }, ENTEL_LINKS[0])
   const backboneScenarios = SCENARIOS.filter((scenario) => !scenario.id.startsWith("cbba-"))
   const cochabambaScenarios = SCENARIOS.filter((scenario) => scenario.id.startsWith("cbba-"))
-  const loadingRouteCount = Object.values(routeRequestState).filter((state) => state === "loading").length
-  const osrmRouteCount = visibleLinks.filter((link) => routeSource[link.id] === "osrm").length
-  const fallbackRouteCount = visibleLinks.length - osrmRouteCount
+  const loadingRouteCount = visibleLinks.filter((link) => routeRequestState[link.id] === "loading").length
+  const mapboxRouteCount = visibleLinks.filter((link) => routeSource[link.id] === "mapbox").length
+  const fallbackRouteCount = visibleLinks.length - mapboxRouteCount
+  const routingHealthLabel = !routingHealth && !routingHealthError
+    ? "Verificando Mapbox..."
+    : routingHealthError
+    ? `Mapbox bloqueado/error: ${routingHealthError}`
+    : routingHealth?.configured
+      ? "Mapbox configurado"
+      : "Mapbox sin token"
 
   useEffect(() => {
+    let cancelled = false
     const visibleRouteLinks = visibleLinkIds
       .split("|")
       .filter(Boolean)
@@ -651,6 +734,7 @@ export function EntelMonitoringMap() {
     visibleRouteLinks.forEach((link) => {
       requestedRouteIdsRef.current.add(link.id)
     })
+    const requestedRouteIds = requestedRouteIdsRef.current
 
     setRouteRequestState((current) => {
       const next = { ...current }
@@ -662,43 +746,79 @@ export function EntelMonitoringMap() {
       return next
     })
 
+    function finishRoute(link: EntelLink, source: RouteSource, path?: [number, number][]) {
+      if (!isMountedRef.current || cancelled) return
+
+      if (path) {
+        resolvedRoutePathsRef.current = { ...resolvedRoutePathsRef.current, [link.id]: path }
+        setResolvedRoutePaths(resolvedRoutePathsRef.current)
+      }
+
+      routeSourceRef.current = { ...routeSourceRef.current, [link.id]: source }
+      setRouteSource(routeSourceRef.current)
+      setRouteRequestState((current) => {
+        const next = { ...current }
+
+        delete next[link.id]
+
+        return next
+      })
+    }
+
+    async function resolveRoute(link: EntelLink) {
+      try {
+        const path = await fetchMapboxRoute(link)
+
+        if (cancelled || !isMountedRef.current) return
+
+        finishRoute(link, "mapbox", path)
+        setRoutingLastResponse("ok")
+      } catch (error) {
+        if (cancelled || !isMountedRef.current) return
+
+        const message = error instanceof Error ? error.message : "Ruta Mapbox no disponible"
+
+        finishRoute(link, getEntelCachedRoute(link.id) ? "cache" : "fallback")
+        setRoutingError(`${getLinkName(link)}: ${message}`)
+        setRoutingLastResponse("error")
+      }
+    }
+
     async function resolveVisibleRoutes() {
-      for (let index = 0; index < visibleRouteLinks.length; index += 1) {
-        const link = visibleRouteLinks[index]
+      for (let index = 0; index < visibleRouteLinks.length; index += ROUTING_BATCH_SIZE) {
+        if (cancelled || !isMountedRef.current) return
 
-        try {
-          const path = await fetchOsrmRoute(link)
+        const batch = visibleRouteLinks.slice(index, index + ROUTING_BATCH_SIZE)
 
-          if (!isMountedRef.current) return
+        await Promise.all(batch.map((link) => resolveRoute(link)))
 
-          resolvedRoutePathsRef.current = { ...resolvedRoutePathsRef.current, [link.id]: path }
-          routeSourceRef.current = { ...routeSourceRef.current, [link.id]: "osrm" }
-          setResolvedRoutePaths(resolvedRoutePathsRef.current)
-          setRouteSource(routeSourceRef.current)
-          setRouteRequestState((current) => {
-            const next = { ...current }
-
-            delete next[link.id]
-
-            return next
-          })
-        } catch (error) {
-          if (!isMountedRef.current) return
-
-          const message = error instanceof Error ? error.message : "Ruta OSM no disponible"
-          routeSourceRef.current = { ...routeSourceRef.current, [link.id]: "fallback" }
-          setRouteSource(routeSourceRef.current)
-          setRoutingError(`${getLinkName(link)}: ${message}. Usando trazado aproximado.`)
-          setRouteRequestState((current) => ({ ...current, [link.id]: "error" }))
-        }
-
-        if (index < visibleRouteLinks.length - 1) {
-          await wait(1100)
+        if (index + ROUTING_BATCH_SIZE < visibleRouteLinks.length) {
+          await wait(350)
         }
       }
     }
 
     void resolveVisibleRoutes()
+
+    return () => {
+      cancelled = true
+      visibleRouteLinks.forEach((link) => {
+        if (!resolvedRoutePathsRef.current[link.id]) {
+          requestedRouteIds.delete(link.id)
+        }
+      })
+      setRouteRequestState((current) => {
+        const next = { ...current }
+
+        visibleRouteLinks.forEach((link) => {
+          if (!resolvedRoutePathsRef.current[link.id]) {
+            delete next[link.id]
+          }
+        })
+
+        return next
+      })
+    }
   }, [routingRetryNonce, visibleLinkIds])
 
   function retryVisibleRoutes() {
@@ -706,6 +826,17 @@ export function EntelMonitoringMap() {
       requestedRouteIdsRef.current.delete(link.id)
     })
     setRoutingError(null)
+    setRoutingLastResponse("idle")
+    setResolvedRoutePaths((current) => {
+      const next = { ...current }
+
+      visibleLinks.forEach((link) => {
+        delete next[link.id]
+      })
+      resolvedRoutePathsRef.current = next
+
+      return next
+    })
     setRouteRequestState((current) => {
       const next = { ...current }
 
@@ -719,7 +850,7 @@ export function EntelMonitoringMap() {
       const next = { ...current }
 
       visibleLinks.forEach((link) => {
-        if (next[link.id] === "fallback") delete next[link.id]
+        delete next[link.id]
       })
       routeSourceRef.current = next
 
@@ -848,7 +979,7 @@ export function EntelMonitoringMap() {
                   </Button>
                   <Button size="sm" variant="outline" onClick={retryVisibleRoutes}>
                     <RotateCcwIcon data-icon="inline-start" />
-                    Reintentar rutas OSRM
+                    Reintentar Mapbox
                   </Button>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -876,8 +1007,7 @@ export function EntelMonitoringMap() {
                   const isSelected = selectedLink.id === link.id
                   const isReroute = activeAlarms.some((alarm) => alarm.rerouteLinks?.includes(link.id))
                   const isHighlighted = highlightedLinks.has(link.id)
-                  const source = routeSource[link.id]
-                  const isFallbackRoute = source !== "osrm"
+                  const source = getRouteSource(link, routeSource)
                   const color = getLinkColor(link, telemetry.status, isReroute)
 
                   return (
@@ -887,9 +1017,9 @@ export function EntelMonitoringMap() {
                       pathOptions={{
                         className: getLinkAnimationClass(telemetry.status, isReroute, isHighlighted),
                         color,
-                        weight: isFallbackRoute ? 2 : isSelected ? 7 : link.layer === "backbone" ? link.type === "backbone" ? 5 : 4 : 2.5,
-                        opacity: isFallbackRoute ? 0.48 : isSelected || isHighlighted ? 0.95 : 0.78,
-                        dashArray: getRouteDashArray(link, source, isReroute),
+                        weight: isSelected ? 7 : link.layer === "backbone" ? link.type === "backbone" ? 5 : 4 : 3,
+                        opacity: isSelected || isHighlighted ? 0.95 : 0.82,
+                        dashArray: getRouteDashArray(link, isReroute, source),
                       }}
                       eventHandlers={{ click: () => setSelectedLinkId(link.id) }}
                     >
@@ -900,7 +1030,7 @@ export function EntelMonitoringMap() {
                           ["Capacidad", `${link.gbps} Gbps`],
                           ["RX optico", `${telemetry.metrics.rxPowerDbm} dBm`],
                           ["Latencia", `${telemetry.metrics.latencyMs} ms`],
-                          ["Ruta", source === "osrm" ? "OSRM OK" : routeRequestState[link.id] === "loading" ? "OSRM cargando" : "Fallback aproximado"],
+                          ["Ruta", source === "mapbox" ? "Mapbox OK" : routeRequestState[link.id] === "loading" ? "Mapbox cargando" : source === "cache" ? "Cache local" : "Fallback aproximado"],
                           ["Estado", STATUS_META[telemetry.status].label],
                         ]} />
                       </Popup>
@@ -912,7 +1042,7 @@ export function EntelMonitoringMap() {
                   const telemetry = linkTelemetry[link.id]
                   const isReroute = activeAlarms.some((alarm) => alarm.rerouteLinks?.includes(link.id))
                   const isAffected = activeAlarms.some((alarm) => alarm.affectedLinks.includes(link.id))
-                  const source = routeSource[link.id]
+                  const source = getRouteSource(link, routeSource)
                   const status = isReroute && !isAffected ? "warning" : telemetry.status
 
                   return (
@@ -923,7 +1053,7 @@ export function EntelMonitoringMap() {
                       pathOptions={{
                         className: getLinkAnimationClass(status, isReroute, true),
                         color: getLinkColor(link, status, isReroute),
-                        dashArray: getRouteDashArray(link, source, isReroute),
+                        dashArray: getRouteDashArray(link, isReroute, source),
                         opacity: 1,
                         weight: link.layer === "distribution" ? 8 : 10,
                       }}
@@ -978,18 +1108,24 @@ export function EntelMonitoringMap() {
                   Zoom {mapZoom}: distribucion visible {showDistribution ? "activa" : "desde zoom 9 o modo distribucion"}.
                 </p>
                 <p className="mt-1 text-muted-foreground">
-                  OSRM: {osrmRouteCount}/{visibleLinks.length} reales, {fallbackRouteCount} fallback{loadingRouteCount ? `, calculando ${loadingRouteCount}` : ""}.
+                  Mapbox: {mapboxRouteCount}/{visibleLinks.length} rutas reales; {fallbackRouteCount} fallback{loadingRouteCount ? `, calculando ${loadingRouteCount}` : ""}.
+                </p>
+                <p className={cn("mt-1", routingHealth?.configured && !routingHealthError ? "text-emerald-600 dark:text-emerald-300" : "text-amber-600 dark:text-amber-300")}>
+                  {routingHealthLabel}
+                </p>
+                <p className={cn("mt-1", routingLastResponse === "ok" ? "text-emerald-600 dark:text-emerald-300" : routingLastResponse === "error" ? "text-amber-600 dark:text-amber-300" : "text-muted-foreground")}>
+                  Ultima respuesta Mapbox: {routingLastResponse === "ok" ? "OK" : routingLastResponse === "error" ? "error" : "pendiente"}
                 </p>
                 {routingError ? (
                   <p className="mt-1 text-amber-600 dark:text-amber-300">{routingError}</p>
                 ) : null}
               </div>
               {activeAlarms[0] ? (
-                <div className="pointer-events-none absolute right-4 top-4 z-[1000] max-w-xs rounded-lg border border-red-500/40 bg-background/95 p-3 text-xs shadow-lg fiber-alert-panel">
-                  <p className="font-semibold text-red-600 dark:text-red-300">Alarma activa</p>
-                  <p className="mt-1 text-foreground">{activeAlarms[0].title}</p>
-                  <p className="mt-1 text-muted-foreground">{activeAlarms[0].description}</p>
-                </div>
+                <TelemetryImpactCard
+                  alarm={activeAlarms[0]}
+                  link={activeImpactLink}
+                  telemetry={activeImpactTelemetry}
+                />
               ) : null}
             </div>
           </CardContent>
@@ -1042,6 +1178,8 @@ export function EntelMonitoringMap() {
               <AlarmCard
                 key={alarm.id}
                 alarm={alarm}
+                link={ENTEL_LINKS.find((link) => alarm.affectedLinks.includes(link.id))}
+                telemetry={linkTelemetry[alarm.affectedLinks[0]]}
                 onResolve={resolveAlarm}
               />
             )) : (
@@ -1224,14 +1362,80 @@ function SelectedLinkPanel({
   )
 }
 
+function TelemetryImpactCard({
+  alarm,
+  link,
+  telemetry,
+}: {
+  alarm: AlarmRecord
+  link?: EntelLink | null
+  telemetry?: { metrics: LinkMetrics; status: NetworkStatus } | null
+}) {
+  if (!link || !telemetry) {
+    return (
+      <div className="pointer-events-none absolute right-4 top-4 z-[1000] max-w-xs rounded-lg border border-red-500/40 bg-background/95 p-3 text-xs shadow-lg">
+        <p className="font-semibold text-red-600 dark:text-red-300">Alarma activa</p>
+        <p className="mt-1 text-foreground">{alarm.title}</p>
+        <p className="mt-1 text-muted-foreground">{alarm.description}</p>
+      </div>
+    )
+  }
+
+  const metrics = telemetry.metrics
+  const baseline = link.metrics
+  const severityClass = telemetry.status === "critical"
+    ? "border-red-500/50 bg-red-950/90 text-red-50"
+    : telemetry.status === "warning"
+      ? "border-amber-500/50 bg-amber-950/90 text-amber-50"
+      : "border-emerald-500/50 bg-emerald-950/90 text-emerald-50"
+
+  return (
+    <div className={cn("pointer-events-none absolute right-4 top-4 z-[1000] w-[320px] max-w-[calc(100%-2rem)] rounded-lg border p-3 text-xs shadow-xl backdrop-blur", severityClass)}>
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-semibold">Impacto de falla</p>
+          <p className="mt-0.5 truncate opacity-90">{getLinkName(link)}</p>
+        </div>
+        <span className="rounded-full bg-white/15 px-2 py-1 font-medium">
+          {STATUS_META[telemetry.status].label}
+        </span>
+      </div>
+      <p className="mb-3 line-clamp-2 opacity-85">{alarm.description}</p>
+      <div className="grid grid-cols-2 gap-2">
+        <ImpactMetric label="Latencia" value={`${metrics.latencyMs} ms`} baseline={`${baseline.latencyMs} ms`} />
+        <ImpactMetric label="RX optico" value={`${metrics.rxPowerDbm} dBm`} baseline={`${baseline.rxPowerDbm} dBm`} />
+        <ImpactMetric label="Perdida" value={`${metrics.packetLossPercent}%`} baseline={`${baseline.packetLossPercent}%`} />
+        <ImpactMetric label="Carga" value={`${metrics.trafficLoadPercent}%`} baseline={`${baseline.trafficLoadPercent}%`} />
+        <ImpactMetric label="Jitter" value={`${metrics.jitterMs} ms`} baseline={`${baseline.jitterMs} ms`} />
+        <ImpactMetric label="Disponibilidad" value={`${metrics.availabilityPercent}%`} baseline={`${baseline.availabilityPercent}%`} />
+      </div>
+    </div>
+  )
+}
+
+function ImpactMetric({ label, value, baseline }: { label: string; value: string; baseline: string }) {
+  return (
+    <div className="rounded-md border border-white/15 bg-white/10 p-2">
+      <p className="text-[10px] uppercase tracking-wide opacity-75">{label}</p>
+      <p className="mt-1 text-sm font-semibold">{value}</p>
+      <p className="text-[10px] opacity-70">Normal {baseline}</p>
+    </div>
+  )
+}
+
 function AlarmCard({
   alarm,
+  link,
+  telemetry,
   onResolve,
 }: {
   alarm: AlarmRecord
+  link?: EntelLink
+  telemetry?: { metrics: LinkMetrics; status: NetworkStatus }
   onResolve: (alarm: AlarmRecord) => void
 }) {
   const stage = getAlarmStage(alarm)
+  const metrics = telemetry?.metrics
 
   return (
     <div className="rounded-lg border bg-muted/30 p-3">
@@ -1266,10 +1470,45 @@ function AlarmCard({
           {alarm.evidence.map((item) => <li key={item}>{item}</li>)}
         </ul>
       </div>
+      {metrics ? (
+        <div className={cn(
+          "mt-3 rounded-md border p-2",
+          telemetry.status === "critical"
+            ? "border-red-500/40 bg-red-500/10"
+            : telemetry.status === "warning"
+              ? "border-amber-500/40 bg-amber-500/10"
+              : "bg-background/70"
+        )}>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-xs font-medium">Telemetria afectada</p>
+            <StatusBadge status={telemetry.status} />
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <AlarmMetric label="RX" value={`${metrics.rxPowerDbm} dBm`} />
+            <AlarmMetric label="Latencia" value={`${metrics.latencyMs} ms`} />
+            <AlarmMetric label="Perdida" value={`${metrics.packetLossPercent}%`} />
+            <AlarmMetric label="Carga" value={`${metrics.trafficLoadPercent}%`} />
+            <AlarmMetric label="Jitter" value={`${metrics.jitterMs} ms`} />
+            <AlarmMetric label="Disp." value={`${metrics.availabilityPercent}%`} />
+          </div>
+          {link ? (
+            <p className="mt-2 text-xs text-muted-foreground">Elemento: {getLinkName(link)}</p>
+          ) : null}
+        </div>
+      ) : null}
       <Button type="button" variant="outline" size="sm" className="mt-3 w-full" onClick={() => onResolve(alarm)}>
         <CheckCircle2Icon data-icon="inline-start" />
         Resolver falla
       </Button>
+    </div>
+  )
+}
+
+function AlarmMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded border bg-background/60 px-2 py-1">
+      <span className="text-muted-foreground">{label}: </span>
+      <span className="font-medium">{value}</span>
     </div>
   )
 }

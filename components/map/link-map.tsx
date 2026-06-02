@@ -9,6 +9,7 @@ import { MapContainer, Polyline, Popup, TileLayer, Tooltip, useMap, useMapEvents
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { Coordinate } from "@/lib/fibermap/calculations"
+import { ENTEL_LINKS, ENTEL_NODES, type EntelLink } from "@/lib/fibermap/entel-network"
 import type { GisLayer, RoutePoint } from "@/lib/fibermap/gis"
 
 const DEFAULT_CENTER: [number, number] = [-17.7833, -63.1821]
@@ -32,6 +33,8 @@ type SearchResult = {
 }
 
 type MapMode = "select" | "pole" | "measure" | "inspect"
+type DesignMode = "free" | "entel"
+type RoutePathCache = Record<string, [number, number][]>
 
 type MapboxFeature = {
   id: string
@@ -49,6 +52,7 @@ type MapboxFeature = {
 }
 
 function MapClickHandler({
+  designMode,
   pointA,
   pointB,
   mode,
@@ -56,6 +60,7 @@ function MapClickHandler({
   onChange,
   onRoutePointsChange,
 }: {
+  designMode: DesignMode
   pointA: Coordinate | null
   pointB: Coordinate | null
   mode: MapMode
@@ -71,6 +76,10 @@ function MapClickHandler({
       }
 
       if (mode === "pole") {
+        if (designMode === "entel" && !pointA) {
+          return
+        }
+
         onRoutePointsChange([
           ...routePoints,
           {
@@ -97,6 +106,141 @@ function MapClickHandler({
   })
 
   return null
+}
+
+function getEntelNode(id: string) {
+  return ENTEL_NODES.find((node) => node.id === id)
+}
+
+function getEntelLinkPositions(link: EntelLink): [number, number][] {
+  return link.path ?? link.waypoints
+}
+
+function getEntelOsrmControlPoints(link: EntelLink): [number, number][] {
+  return link.waypoints.length >= 2 ? link.waypoints : getEntelLinkPositions(link)
+}
+
+async function fetchStreetRoute(points: [number, number][]) {
+  const response = await fetch("/api/routing/osrm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ points }),
+  })
+  const payload = await response.json() as { path?: [number, number][]; error?: string }
+
+  if (!response.ok || !payload.path?.length) {
+    throw new Error(payload.error ?? "Ruta OSRM no disponible")
+  }
+
+  return payload.path
+}
+
+function samplePath(path: [number, number][], maxPoints: number) {
+  if (path.length <= maxPoints) return path
+
+  const sampled: [number, number][] = []
+  const step = (path.length - 1) / (maxPoints - 1)
+
+  for (let index = 0; index < maxPoints; index += 1) {
+    sampled.push(path[Math.round(index * step)])
+  }
+
+  return sampled
+}
+
+function pathToRoutePoints(path: [number, number][], prefix: string): RoutePoint[] {
+  return samplePath(path, 20).slice(1, -1).map(([lat, lng], index) => ({
+    id: `${prefix}-${index}`,
+    kind: "pole",
+    label: `Punto vial ${index + 1}`,
+    lat,
+    lng,
+  }))
+}
+
+function getEntelLinkColor(link: EntelLink) {
+  if (link.type === "international") return "#f97316"
+  if (link.layer === "distribution") return "#38bdf8"
+
+  return "#2563eb"
+}
+
+function EntelNetworkLayer({
+  selectedEntelNodeId,
+  resolvedRoutePaths,
+  onEntelOriginSelect,
+}: {
+  selectedEntelNodeId?: string
+  resolvedRoutePaths: RoutePathCache
+  onEntelOriginSelect?: (nodeId: string) => void
+}) {
+  return (
+    <>
+      {ENTEL_LINKS.map((link) => {
+        const from = getEntelNode(link.from)
+        const to = getEntelNode(link.to)
+        const isResolved = Boolean(resolvedRoutePaths[link.id])
+
+        return (
+          <Polyline
+            key={`entel-${link.id}`}
+            positions={resolvedRoutePaths[link.id] ?? getEntelLinkPositions(link)}
+            pathOptions={{
+              color: getEntelLinkColor(link),
+              dashArray: isResolved ? link.type === "international" ? "8 7" : undefined : "2 10",
+              opacity: isResolved ? 0.74 : 0.16,
+              weight: isResolved ? link.layer === "backbone" ? 4 : 3 : 1.5,
+            }}
+          >
+            <Tooltip sticky>
+              {`${from?.name ?? link.from} -> ${to?.name ?? link.to}`}
+            </Tooltip>
+            <Popup>
+              <div className="space-y-1 text-sm">
+                <p className="font-semibold">{`${from?.name ?? link.from} -> ${to?.name ?? link.to}`}</p>
+                <p>{link.km.toLocaleString("es-BO")} km / {link.gbps} Gbps</p>
+                <p className="text-muted-foreground">
+                  {resolvedRoutePaths[link.id] ? "Ruta ajustada por OSRM/OSM." : "Ruta aproximada. Selecciona un nodo para usarlo como origen."}
+                </p>
+              </div>
+            </Popup>
+          </Polyline>
+        )
+      })}
+
+      {ENTEL_NODES.map((node) => {
+        const isSelected = node.id === selectedEntelNodeId
+
+        return (
+          <CircleMarker
+            key={`entel-node-${node.id}`}
+            center={[node.lat, node.lon]}
+            radius={isSelected ? 10 : node.datacenter ? 8 : node.layer === "distribution" ? 5 : 7}
+            pathOptions={{
+              color: isSelected ? "#dc2626" : node.gateway ? "#f97316" : node.datacenter ? "#111827" : node.layer === "distribution" ? "#0ea5e9" : "#1d4ed8",
+              fillOpacity: isSelected ? 0.95 : 0.82,
+              weight: isSelected ? 4 : node.datacenter ? 3 : 2,
+            }}
+            eventHandlers={{
+              click: (event) => {
+                DomEvent.stopPropagation(event)
+                onEntelOriginSelect?.(node.id)
+              },
+            }}
+          >
+            <Tooltip>{node.name}</Tooltip>
+            <Popup>
+              <div className="space-y-1 text-sm">
+                <p className="font-semibold">{node.name}</p>
+                <p className="text-muted-foreground">{node.region}</p>
+                <p>Click para usar este nodo como Punto A.</p>
+              </div>
+            </Popup>
+          </CircleMarker>
+        )
+      })}
+    </>
+  )
 }
 
 function MapViewport({
@@ -572,38 +716,121 @@ function formatSecondaryResult(result: SearchResult) {
 }
 
 export function LinkMap({
+  designMode = "free",
   pointA,
   pointB,
   mode = "select",
   routePoints = [],
   gisLayers = [],
+  selectedEntelNodeId,
   onChange,
+  onEntelOriginSelect,
   onRoutePointsChange,
 }: {
+  designMode?: DesignMode
   pointA: Coordinate | null
   pointB: Coordinate | null
   mode?: MapMode
   routePoints?: RoutePoint[]
   gisLayers?: GisLayer[]
+  selectedEntelNodeId?: string
   onChange: (pointA: Coordinate | null, pointB: Coordinate | null) => void
+  onEntelOriginSelect?: (nodeId: string) => void
   onRoutePointsChange?: (points: RoutePoint[]) => void
 }) {
   const [focusedLocation, setFocusedLocation] = useState<Coordinate | null>(null)
+  const [entelRoutePaths, setEntelRoutePaths] = useState<RoutePathCache>({})
+  const requestedEntelRoutesRef = useRef<Set<string>>(new Set())
+  const generatedEntelBranchKeyRef = useRef<string | null>(null)
   const center = useMemo<[number, number]>(
     () => (pointA ? [pointA.lat, pointA.lng] : DEFAULT_CENTER),
     [pointA]
   )
   const status = pointA && pointB
-    ? "Enlace definido"
-    : pointA
-      ? "Selecciona Punto B"
-      : "Selecciona Punto A"
+    ? designMode === "entel" ? "Enlace desde red Entel definido" : "Enlace definido"
+    : designMode === "entel"
+      ? pointA ? "Selecciona el nuevo destino" : "Modo red Entel: selecciona nodo origen"
+      : pointA
+        ? "Selecciona Punto B"
+        : "Selecciona Punto A"
+  const entelRoutingStatus = designMode === "entel"
+    ? ` · rutas OSM ${Object.keys(entelRoutePaths).length}/${ENTEL_LINKS.length}`
+    : ""
   const routeLine = [
     ...(pointA ? [[pointA.lat, pointA.lng] as [number, number]] : []),
     ...routePoints.map((point) => [point.lat, point.lng] as [number, number]),
     ...(pointB ? [[pointB.lat, pointB.lng] as [number, number]] : []),
   ]
-  const safeOnRoutePointsChange = onRoutePointsChange ?? (() => {})
+  const noopRoutePointsChange = useMemo(() => () => {}, [])
+  const safeOnRoutePointsChange = onRoutePointsChange ?? noopRoutePointsChange
+
+  useEffect(() => {
+    if (designMode !== "entel") return
+
+    let cancelled = false
+    const pendingLinks = ENTEL_LINKS.filter((link) => !entelRoutePaths[link.id] && !requestedEntelRoutesRef.current.has(link.id))
+
+    pendingLinks.forEach((link) => {
+      requestedEntelRoutesRef.current.add(link.id)
+    })
+
+    async function resolveEntelRoutes() {
+      for (const link of pendingLinks) {
+        try {
+          const path = await fetchStreetRoute(getEntelOsrmControlPoints(link))
+
+          if (cancelled) return
+
+          setEntelRoutePaths((current) => ({ ...current, [link.id]: path }))
+        } catch {
+          if (cancelled) return
+        }
+
+        await new Promise((resolve) => window.setTimeout(resolve, 450))
+      }
+    }
+
+    void resolveEntelRoutes()
+
+    return () => {
+      cancelled = true
+    }
+  }, [designMode, entelRoutePaths])
+
+  useEffect(() => {
+    if (designMode !== "entel" || !pointA || !pointB) {
+      generatedEntelBranchKeyRef.current = null
+      return
+    }
+
+    const routeKey = `${pointA.lat},${pointA.lng}:${pointB.lat},${pointB.lng}`
+    if (generatedEntelBranchKeyRef.current === routeKey) return
+
+    generatedEntelBranchKeyRef.current = routeKey
+    const origin: [number, number] = [pointA.lat, pointA.lng]
+    const destination: [number, number] = [pointB.lat, pointB.lng]
+    let cancelled = false
+
+    async function resolveBranchRoute() {
+      try {
+        const path = await fetchStreetRoute([origin, destination])
+
+        if (cancelled) return
+
+        safeOnRoutePointsChange(pathToRoutePoints(path, `entel-branch-${Date.now()}`))
+      } catch {
+        if (cancelled) return
+
+        safeOnRoutePointsChange([])
+      }
+    }
+
+    void resolveBranchRoute()
+
+    return () => {
+      cancelled = true
+    }
+  }, [designMode, pointA, pointB, safeOnRoutePointsChange])
 
   return (
     <div className="relative h-[420px] w-full min-w-0">
@@ -619,6 +846,7 @@ export function LinkMap({
         />
         <MapViewport pointA={pointA} pointB={pointB} />
         <MapClickHandler
+          designMode={designMode}
           pointA={pointA}
           pointB={pointB}
           mode={mode}
@@ -635,6 +863,13 @@ export function LinkMap({
         {gisLayers.map((layer) => (
           <GeoJSON key={layer.id} data={layer.data as never} />
         ))}
+        {designMode === "entel" ? (
+          <EntelNetworkLayer
+            selectedEntelNodeId={selectedEntelNodeId}
+            resolvedRoutePaths={entelRoutePaths}
+            onEntelOriginSelect={onEntelOriginSelect}
+          />
+        ) : null}
         {focusedLocation ? (
           <CircleMarker
             center={[focusedLocation.lat, focusedLocation.lng]}
@@ -653,7 +888,7 @@ export function LinkMap({
             <Popup>Punto A</Popup>
           </CircleMarker>
         ) : null}
-        {routePoints.map((point, index) => (
+        {routePoints.filter((point) => !point.id.startsWith("entel-branch-")).map((point, index) => (
           <CircleMarker
             key={point.id}
             center={[point.lat, point.lng]}
@@ -681,7 +916,7 @@ export function LinkMap({
         ) : null}
       </MapContainer>
       <div className="pointer-events-none absolute bottom-3 left-3 z-[1000] rounded-md border bg-background/95 px-3 py-2 text-sm font-medium shadow-sm">
-        {status}
+        {status}{entelRoutingStatus}
       </div>
     </div>
   )
