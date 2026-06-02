@@ -309,7 +309,7 @@ export const BACKBONE_LINKS: EntelLink[] = [
   createLink({ id: "or_tq", from: "oruro", to: "tambo_quemado", km: 220, gbps: 1, layer: "backbone", type: "international", waypoints: [[-17.9834, -67.1066], [-18.1, -68], [-18.2847, -69.0714]] }),
   createLink({ id: "or_cb", from: "oruro", to: "cochabamba", km: 210, gbps: 2.5, layer: "backbone", type: "backbone", waypoints: [[-17.9834, -67.1066], [-17.65, -66.95], [-17.4, -66.45], [-17.3895, -66.1568]] }),
   createLink({ id: "lp_cb", from: "la_paz", to: "cochabamba", km: 395, gbps: 2.5, layer: "backbone", type: "backbone", waypoints: [[-16.4897, -68.1193], [-17.2333, -67.9167], [-17.9834, -67.1066], [-17.65, -66.95], [-17.3895, -66.1568]] }),
-  createLink({ id: "cb_sc", from: "cochabamba", to: "santa_cruz", km: 500, gbps: 2.5, layer: "backbone", type: "backbone", waypoints: [[-17.3895, -66.1568], [-17.3833, -66.0333], [-17.3167, -65.7667], [-16.9833, -65.4167], [-16.97, -65.15], [-17.5, -63.7], [-17.7863, -63.1812]] }),
+  createLink({ id: "cb_sc", from: "cochabamba", to: "santa_cruz", km: 500, gbps: 2.5, layer: "backbone", type: "backbone", waypoints: [[-17.3895, -66.1568], [-17.383, -66.07], [-17.317, -65.767], [-17.195, -65.56], [-16.983, -65.417], [-16.97, -65.15], [-17.1, -64.2], [-17.5, -63.7], [-17.786, -63.181]] }),
   createLink({ id: "cb_po", from: "cochabamba", to: "potosi", km: 320, gbps: 1, layer: "backbone", type: "regional", waypoints: [[-17.3895, -66.1568], [-17.6167, -65.8833], [-17.95, -65.5], [-18.7, -65.2], [-19.0434, -65.2592], [-19.5836, -65.7531]] }),
   createLink({ id: "su_ta", from: "sucre", to: "tarija", km: 395, gbps: 1, layer: "backbone", type: "regional", waypoints: [[-19.0434, -65.2592], [-20, -65.2], [-21.5355, -64.7296]] }),
   createLink({ id: "ta_ya", from: "tarija", to: "yacuiba", km: 165, gbps: 1, layer: "backbone", type: "international", waypoints: [[-21.5355, -64.7296], [-22.0526, -63.6833]] }),
@@ -334,17 +334,70 @@ export const DISTRIBUTION_NODES_CBBA: EntelNode[] = [
 ]
 
 const DISTRIBUTION_ROUTE_HINTS: Record<string, [number, number][]> = {
-  sacaba: [[-17.386, -66.09]],
-  colcapirhua: [[-17.386, -66.2]],
-  quillacollo: [[-17.386, -66.265]],
-  vinto: [[-17.398, -66.315]],
-  sipe_sipe: [[-17.43, -66.38]],
-  tiquipaya: [[-17.36, -66.18]],
-  colomi: [[-17.35, -65.93], [-17.33, -65.84]],
-  punata: [[-17.48, -66.05], [-17.54, -65.92]],
-  cliza: [[-17.58, -65.9]],
-  tarata: [[-17.58, -65.99]],
-  santivanez: [[-17.48, -66.2]],
+  sacaba: [
+    [-17.384, -66.149],
+    [-17.382, -66.12],
+    [-17.381, -66.097],
+  ],
+  colcapirhua: [
+    [-17.388, -66.19],
+    [-17.387, -66.223],
+  ],
+  quillacollo: [
+    [-17.388, -66.19],
+    [-17.387, -66.223],
+    [-17.388, -66.265],
+  ],
+  vinto: [
+    [-17.388, -66.19],
+    [-17.387, -66.223],
+    [-17.394, -66.283],
+    [-17.397, -66.318],
+  ],
+  sipe_sipe: [
+    [-17.388, -66.19],
+    [-17.394, -66.283],
+    [-17.4, -66.35],
+    [-17.42, -66.374],
+    [-17.443, -66.393],
+  ],
+  tiquipaya: [
+    [-17.375, -66.178],
+    [-17.358, -66.204],
+  ],
+  colomi: [
+    [-17.384, -66.149],
+    [-17.382, -66.097],
+    [-17.369, -65.982],
+    [-17.355, -65.905],
+    [-17.34, -65.853],
+    [-17.325, -65.81],
+  ],
+  punata: [
+    [-17.384, -66.149],
+    [-17.382, -66.097],
+    [-17.42, -66.012],
+    [-17.46, -65.962],
+    [-17.5, -65.9],
+  ],
+  cliza: [
+    [-17.384, -66.149],
+    [-17.382, -66.097],
+    [-17.5, -65.9],
+    [-17.572, -65.879],
+  ],
+  tarata: [
+    [-17.384, -66.149],
+    [-17.382, -66.097],
+    [-17.5, -65.9],
+    [-17.567, -65.96],
+  ],
+  santivanez: [
+    [-17.415, -66.16],
+    [-17.445, -66.183],
+    [-17.478, -66.21],
+    [-17.51, -66.232],
+  ],
 }
 
 function distributionLinkFor(node: EntelNode): EntelLink | null {
