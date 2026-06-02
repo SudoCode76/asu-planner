@@ -1,7 +1,7 @@
 "use client"
 
 import type { ComponentType } from "react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertTriangleIcon,
   CheckCircle2Icon,
@@ -82,6 +82,16 @@ type Scenario = {
   switchedTrafficGbps?: number
   remainingCapacityGbps?: number
   traceOverrides?: Record<string, TraceEvent[]>
+}
+
+type RouteRequestState = "loading" | "error"
+
+type RouteSource = "osrm" | "fallback"
+
+type RoutingProxyResponse = {
+  path?: [number, number][]
+  source?: RouteSource
+  error?: string
 }
 
 const NETWORK_CENTER: [number, number] = [-17.9, -64.4]
@@ -369,8 +379,35 @@ function getLinkName(link: EntelLink) {
   return `${getNode(link.from).name} -> ${getNode(link.to).name}`
 }
 
-function getLinkPositions(link: EntelLink): [number, number][] {
-  return link.waypoints
+async function fetchOsrmRoute(link: EntelLink) {
+  const response = await fetch("/api/routing/osrm", {
+    body: JSON.stringify({ points: link.waypoints }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  })
+  const data = await response.json() as RoutingProxyResponse
+
+  if (!response.ok || data.source !== "osrm" || !data.path?.length) {
+    throw new Error(data.error ?? `OSRM HTTP ${response.status}`)
+  }
+
+  return data.path
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+function getLinkPositions(link: EntelLink, resolvedRoutePaths: Record<string, [number, number][]>) {
+  return resolvedRoutePaths[link.id] ?? link.path ?? link.waypoints
+}
+
+function getRouteDashArray(link: EntelLink, source: RouteSource | undefined, isReroute: boolean) {
+  if (source !== "osrm") return "3 7"
+  if (link.type === "international") return "8 8"
+  if (isReroute) return "12 6"
+
+  return undefined
 }
 
 function gatewayDiamond(lat: number, lon: number): [number, number][] {
@@ -514,6 +551,15 @@ function getNodeAnimationClass(status: NetworkStatus) {
 export function EntelMonitoringMap() {
   const [linkMetricPatches, setLinkMetricPatches] = useState<Record<string, Partial<LinkMetrics>>>({})
   const [nodeMetricPatches, setNodeMetricPatches] = useState<Record<string, Partial<NodeMetrics>>>({})
+  const [resolvedRoutePaths, setResolvedRoutePaths] = useState<Record<string, [number, number][]>>({})
+  const [routeRequestState, setRouteRequestState] = useState<Record<string, RouteRequestState>>({})
+  const [routeSource, setRouteSource] = useState<Record<string, RouteSource>>({})
+  const [routingError, setRoutingError] = useState<string | null>(null)
+  const [routingRetryNonce, setRoutingRetryNonce] = useState(0)
+  const resolvedRoutePathsRef = useRef<Record<string, [number, number][]>>({})
+  const routeSourceRef = useRef<Record<string, RouteSource>>({})
+  const requestedRouteIdsRef = useRef<Set<string>>(new Set())
+  const isMountedRef = useRef(true)
   const [alarmLog, setAlarmLog] = useState<AlarmRecord[]>([])
   const [selectedLinkId, setSelectedLinkId] = useState("lp_cb")
   const [visibleLayer, setVisibleLayer] = useState<NetworkLayer | "both">("both")
@@ -528,6 +574,12 @@ export function EntelMonitoringMap() {
     }, 3000)
 
     return () => window.clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false
+    }
   }, [])
 
   const linkTelemetry = useMemo(() => {
@@ -568,6 +620,7 @@ export function EntelMonitoringMap() {
     (link.layer === "backbone" && showBackbone) ||
     (link.layer === "distribution" && showDistribution)
   )
+  const visibleLinkIds = visibleLinks.map((link) => link.id).join("|")
   const visibleNodes = ENTEL_NODES.filter((node) =>
     node.datacenter ||
     (node.layer === "backbone" && showBackbone) ||
@@ -581,6 +634,99 @@ export function EntelMonitoringMap() {
   }, ENTEL_LINKS[0])
   const backboneScenarios = SCENARIOS.filter((scenario) => !scenario.id.startsWith("cbba-"))
   const cochabambaScenarios = SCENARIOS.filter((scenario) => scenario.id.startsWith("cbba-"))
+  const loadingRouteCount = Object.values(routeRequestState).filter((state) => state === "loading").length
+  const osrmRouteCount = visibleLinks.filter((link) => routeSource[link.id] === "osrm").length
+  const fallbackRouteCount = visibleLinks.length - osrmRouteCount
+
+  useEffect(() => {
+    const visibleRouteLinks = visibleLinkIds
+      .split("|")
+      .filter(Boolean)
+      .map((linkId) => ENTEL_LINKS.find((link) => link.id === linkId))
+      .filter((link): link is EntelLink => Boolean(link))
+      .filter((link) => !resolvedRoutePathsRef.current[link.id] && !requestedRouteIdsRef.current.has(link.id))
+
+    if (!visibleRouteLinks.length) return
+
+    visibleRouteLinks.forEach((link) => {
+      requestedRouteIdsRef.current.add(link.id)
+    })
+
+    setRouteRequestState((current) => {
+      const next = { ...current }
+
+      visibleRouteLinks.forEach((link) => {
+        next[link.id] = "loading"
+      })
+
+      return next
+    })
+
+    async function resolveVisibleRoutes() {
+      for (let index = 0; index < visibleRouteLinks.length; index += 1) {
+        const link = visibleRouteLinks[index]
+
+        try {
+          const path = await fetchOsrmRoute(link)
+
+          if (!isMountedRef.current) return
+
+          resolvedRoutePathsRef.current = { ...resolvedRoutePathsRef.current, [link.id]: path }
+          routeSourceRef.current = { ...routeSourceRef.current, [link.id]: "osrm" }
+          setResolvedRoutePaths(resolvedRoutePathsRef.current)
+          setRouteSource(routeSourceRef.current)
+          setRouteRequestState((current) => {
+            const next = { ...current }
+
+            delete next[link.id]
+
+            return next
+          })
+        } catch (error) {
+          if (!isMountedRef.current) return
+
+          const message = error instanceof Error ? error.message : "Ruta OSM no disponible"
+          routeSourceRef.current = { ...routeSourceRef.current, [link.id]: "fallback" }
+          setRouteSource(routeSourceRef.current)
+          setRoutingError(`${getLinkName(link)}: ${message}. Usando trazado aproximado.`)
+          setRouteRequestState((current) => ({ ...current, [link.id]: "error" }))
+        }
+
+        if (index < visibleRouteLinks.length - 1) {
+          await wait(1100)
+        }
+      }
+    }
+
+    void resolveVisibleRoutes()
+  }, [routingRetryNonce, visibleLinkIds])
+
+  function retryVisibleRoutes() {
+    visibleLinks.forEach((link) => {
+      requestedRouteIdsRef.current.delete(link.id)
+    })
+    setRoutingError(null)
+    setRouteRequestState((current) => {
+      const next = { ...current }
+
+      visibleLinks.forEach((link) => {
+        delete next[link.id]
+      })
+
+      return next
+    })
+    setRouteSource((current) => {
+      const next = { ...current }
+
+      visibleLinks.forEach((link) => {
+        if (next[link.id] === "fallback") delete next[link.id]
+      })
+      routeSourceRef.current = next
+
+      return next
+    })
+    setRoutingRetryNonce((current) => current + 1)
+  }
 
   function activateScenario(scenario: Scenario) {
     if (activeAlarms.length) return
@@ -686,7 +832,7 @@ export function EntelMonitoringMap() {
               <div>
                 <CardTitle>Mapa NOC Entel Bolivia</CardTitle>
                 <CardDescription>
-                  Dos capas jerarquicas: backbone enterrado por carretera y distribucion GPON/FTTH Cbba.
+                  Dos capas jerarquicas: backbone enterrado por carretera y distribucion GPON/FTTH Cbba. Trazado aproximado por corredores viales OSM; no es plano propietario de Entel.
                 </CardDescription>
               </div>
               <div className="flex flex-col gap-2">
@@ -699,6 +845,10 @@ export function EntelMonitoringMap() {
                   </Button>
                   <Button size="sm" variant={visibleLayer === "both" ? "default" : "outline"} onClick={() => setVisibleLayer("both")}>
                     Ver ambas
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={retryVisibleRoutes}>
+                    <RotateCcwIcon data-icon="inline-start" />
+                    Reintentar rutas OSRM
                   </Button>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -726,18 +876,20 @@ export function EntelMonitoringMap() {
                   const isSelected = selectedLink.id === link.id
                   const isReroute = activeAlarms.some((alarm) => alarm.rerouteLinks?.includes(link.id))
                   const isHighlighted = highlightedLinks.has(link.id)
+                  const source = routeSource[link.id]
+                  const isFallbackRoute = source !== "osrm"
                   const color = getLinkColor(link, telemetry.status, isReroute)
 
                   return (
                     <Polyline
                       key={link.id}
-                      positions={getLinkPositions(link)}
+                      positions={getLinkPositions(link, resolvedRoutePaths)}
                       pathOptions={{
                         className: getLinkAnimationClass(telemetry.status, isReroute, isHighlighted),
                         color,
-                        weight: isSelected ? 7 : link.layer === "backbone" ? link.type === "backbone" ? 5 : 4 : 2.5,
-                        opacity: isSelected || isHighlighted ? 0.95 : 0.78,
-                        dashArray: link.type === "international" ? "8 8" : isReroute ? "12 6" : undefined,
+                        weight: isFallbackRoute ? 2 : isSelected ? 7 : link.layer === "backbone" ? link.type === "backbone" ? 5 : 4 : 2.5,
+                        opacity: isFallbackRoute ? 0.48 : isSelected || isHighlighted ? 0.95 : 0.78,
+                        dashArray: getRouteDashArray(link, source, isReroute),
                       }}
                       eventHandlers={{ click: () => setSelectedLinkId(link.id) }}
                     >
@@ -748,6 +900,7 @@ export function EntelMonitoringMap() {
                           ["Capacidad", `${link.gbps} Gbps`],
                           ["RX optico", `${telemetry.metrics.rxPowerDbm} dBm`],
                           ["Latencia", `${telemetry.metrics.latencyMs} ms`],
+                          ["Ruta", source === "osrm" ? "OSRM OK" : routeRequestState[link.id] === "loading" ? "OSRM cargando" : "Fallback aproximado"],
                           ["Estado", STATUS_META[telemetry.status].label],
                         ]} />
                       </Popup>
@@ -759,17 +912,18 @@ export function EntelMonitoringMap() {
                   const telemetry = linkTelemetry[link.id]
                   const isReroute = activeAlarms.some((alarm) => alarm.rerouteLinks?.includes(link.id))
                   const isAffected = activeAlarms.some((alarm) => alarm.affectedLinks.includes(link.id))
+                  const source = routeSource[link.id]
                   const status = isReroute && !isAffected ? "warning" : telemetry.status
 
                   return (
                     <Polyline
                       key={`alarm-${link.id}`}
                       interactive={false}
-                      positions={getLinkPositions(link)}
+                      positions={getLinkPositions(link, resolvedRoutePaths)}
                       pathOptions={{
                         className: getLinkAnimationClass(status, isReroute, true),
                         color: getLinkColor(link, status, isReroute),
-                        dashArray: isReroute ? "12 6" : link.type === "international" ? "8 8" : undefined,
+                        dashArray: getRouteDashArray(link, source, isReroute),
                         opacity: 1,
                         weight: link.layer === "distribution" ? 8 : 10,
                       }}
@@ -823,6 +977,12 @@ export function EntelMonitoringMap() {
                 <p className="text-muted-foreground">
                   Zoom {mapZoom}: distribucion visible {showDistribution ? "activa" : "desde zoom 9 o modo distribucion"}.
                 </p>
+                <p className="mt-1 text-muted-foreground">
+                  OSRM: {osrmRouteCount}/{visibleLinks.length} reales, {fallbackRouteCount} fallback{loadingRouteCount ? `, calculando ${loadingRouteCount}` : ""}.
+                </p>
+                {routingError ? (
+                  <p className="mt-1 text-amber-600 dark:text-amber-300">{routingError}</p>
+                ) : null}
               </div>
               {activeAlarms[0] ? (
                 <div className="pointer-events-none absolute right-4 top-4 z-[1000] max-w-xs rounded-lg border border-red-500/40 bg-background/95 p-3 text-xs shadow-lg fiber-alert-panel">
