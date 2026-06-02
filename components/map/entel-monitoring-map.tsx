@@ -215,6 +215,117 @@ const SCENARIOS: Scenario[] = [
     evidence: ["Latencia simulada 180 ms vs normal 55 ms", "Jitter internacional elevado", "Perdida de paquetes sobre 1%"],
     recommendation: "Comparar con gateway Pacifico y revisar proveedor de transito hacia Sao Paulo.",
   },
+  {
+    id: "cbba-dc-santivanez",
+    title: "Falla critica Data Center Santivanez",
+    description: "Nodo DC Santivanez con perdida de disponibilidad; impacto metropolitano y nacional.",
+    severity: "critical",
+    alarmType: "capacity_saturation",
+    elementId: "santivanez",
+    elementType: "node",
+    affectedLinks: ["dist_cbba_central_santivanez"],
+    affectedNodes: ["santivanez"],
+    linkMetricPatches: {
+      dist_cbba_central_santivanez: { rxPowerDbm: -31, attenuationDb: 18, latencyMs: 42, jitterMs: 16, packetLossPercent: 8.5, trafficLoadPercent: 96, availabilityPercent: 81 },
+    },
+    nodeMetricPatches: {
+      santivanez: { latencyMs: 78, packetLossPercent: 6.2, trafficLoadPercent: 98, availabilityPercent: 88 },
+    },
+    probableCause: "Falla de energia o conmutacion en sala tecnica del Data Center Santivanez.",
+    evidence: ["Disponibilidad DC por debajo de 95%", "Carga critica 98%", "Perdida sobre 6% en enlace de distribucion"],
+    recommendation: "Escalar prioridad maxima, validar UPS/generador y verificar uplink al nodo central Cbba.",
+    traceOverrides: {
+      dist_cbba_central_santivanez: [
+        { km: 0, type: "connector", lossDb: 0.18, status: "ok", description: "Puerto OLT central operativo." },
+        { km: 9.8, type: "high_loss", lossDb: 8.4, status: "critical", description: "Alta perdida hacia Santivanez, posible daño en feeder o patch panel DC." },
+      ],
+    },
+  },
+  {
+    id: "cbba-sacaba-colomi",
+    title: "Corte distribucion Sacaba-Colomi",
+    description: "Corte en subida a Colomi; clientes GPON del valle alto quedan sin servicio.",
+    severity: "major",
+    alarmType: "fiber_cut",
+    elementId: "dist_sacaba_colomi",
+    elementType: "link",
+    affectedLinks: ["dist_sacaba_colomi"],
+    affectedNodes: ["colomi"],
+    linkMetricPatches: {
+      dist_sacaba_colomi: { rxPowerDbm: -39, attenuationDb: 32, latencyMs: 0, jitterMs: 0, packetLossPercent: 100, trafficLoadPercent: 0, availabilityPercent: 0 },
+    },
+    nodeMetricPatches: {
+      colomi: { latencyMs: 0, packetLossPercent: 100, trafficLoadPercent: 0, availabilityPercent: 0 },
+    },
+    probableCause: "Corte de fibra en tramo de serrania entre Sacaba y Colomi.",
+    evidence: ["OTDR muestra evento abrupto", "Perdida de paquetes 100%", "Nodo Colomi sin telemetria"],
+    recommendation: "Enviar cuadrilla a ruta antigua a Santa Cruz y revisar camaras de empalme en serrania.",
+    traceOverrides: {
+      dist_sacaba_colomi: [
+        { km: 0, type: "connector", lossDb: 0.2, status: "ok", description: "Conector Sacaba operativo." },
+        { km: 17.4, type: "cut", lossDb: 32, status: "critical", description: "Corte probable en subida a Colomi." },
+      ],
+    },
+  },
+  {
+    id: "cbba-quillacollo-vinto",
+    title: "Degradacion Quillacollo-Vinto",
+    description: "Atenuacion elevada en troncal oeste metropolitana.",
+    severity: "major",
+    alarmType: "optical_degradation",
+    elementId: "dist_quillacollo_vinto",
+    elementType: "link",
+    affectedLinks: ["dist_quillacollo_vinto"],
+    linkMetricPatches: {
+      dist_quillacollo_vinto: { rxPowerDbm: -22.4, attenuationDb: 15.2, latencyMs: 12, jitterMs: 5, packetLossPercent: 1.7, trafficLoadPercent: 67, availabilityPercent: 98.6 },
+    },
+    probableCause: "Empalme humedo o conector degradado en ruta Quillacollo-Vinto.",
+    evidence: ["RX bajo umbral warning", "Atenuacion elevada", "Jitter sobre valor normal GPON"],
+    recommendation: "Medir potencia en ODF Quillacollo y revisar caja de empalme hacia Vinto.",
+    traceOverrides: {
+      dist_quillacollo_vinto: [
+        { km: 0, type: "connector", lossDb: 0.16, status: "ok", description: "Puerto Quillacollo operativo." },
+        { km: 4.2, type: "high_loss", lossDb: 4.9, status: "warning", description: "Evento de perdida no reflectiva, posible empalme humedo." },
+        { km: 7, type: "connector", lossDb: 0.22, status: "ok", description: "Conector Vinto dentro de rango." },
+      ],
+    },
+  },
+  {
+    id: "cbba-punata-cliza",
+    title: "Saturacion OLT Punata-Cliza",
+    description: "Carga elevada en rama de distribucion Punata-Cliza.",
+    severity: "minor",
+    alarmType: "capacity_saturation",
+    elementId: "dist_punata_cliza",
+    elementType: "link",
+    affectedLinks: ["dist_punata_cliza"],
+    linkMetricPatches: {
+      dist_punata_cliza: { latencyMs: 28, jitterMs: 11, packetLossPercent: 0.9, trafficLoadPercent: 91, availabilityPercent: 99.1 },
+    },
+    probableCause: "Congestion en puerto GPON por alta demanda residencial.",
+    evidence: ["Carga sobre 90%", "Jitter elevado", "Latencia superior al promedio metropolitano"],
+    recommendation: "Balancear ONTs, migrar splitters saturados o ampliar puerto PON.",
+  },
+  {
+    id: "cbba-tiquipaya",
+    title: "Microcorte Tiquipaya",
+    description: "Microcortes intermitentes hacia Tiquipaya con perdida baja pero recurrente.",
+    severity: "minor",
+    alarmType: "optical_degradation",
+    elementId: "dist_cbba_central_tiquipaya",
+    elementType: "link",
+    affectedLinks: ["dist_cbba_central_tiquipaya"],
+    affectedNodes: ["tiquipaya"],
+    linkMetricPatches: {
+      dist_cbba_central_tiquipaya: { rxPowerDbm: -18.9, attenuationDb: 9.5, latencyMs: 16, jitterMs: 7, packetLossPercent: 1.3, trafficLoadPercent: 58, availabilityPercent: 97.8 },
+    },
+    nodeMetricPatches: {
+      tiquipaya: { latencyMs: 18, packetLossPercent: 1.4, trafficLoadPercent: 58, availabilityPercent: 97.8 },
+    },
+    probableCause: "Macrocurvatura o caja de distribucion inestable en salida norte.",
+    evidence: ["Perdida intermitente superior a 1%", "RX cerca del umbral warning", "Jitter variable"],
+    recommendation: "Inspeccionar caja terminal y reserva de fibra en la ruta norte a Tiquipaya.",
+  },
 ]
 
 function MonitoringViewport() {
@@ -385,6 +496,21 @@ function getLinkColor(link: EntelLink, status: NetworkStatus, isReroute: boolean
   return "#1d4ed8"
 }
 
+function getLinkAnimationClass(status: NetworkStatus, isReroute: boolean, isHighlighted: boolean) {
+  if (status === "critical") return "fiber-critical-link"
+  if (isReroute) return "fiber-reroute-link"
+  if (status === "warning" || isHighlighted) return "fiber-warning-link"
+
+  return undefined
+}
+
+function getNodeAnimationClass(status: NetworkStatus) {
+  if (status === "critical") return "fiber-node-critical"
+  if (status === "warning") return "fiber-node-warning"
+
+  return undefined
+}
+
 export function EntelMonitoringMap() {
   const [linkMetricPatches, setLinkMetricPatches] = useState<Record<string, Partial<LinkMetrics>>>({})
   const [nodeMetricPatches, setNodeMetricPatches] = useState<Record<string, Partial<NodeMetrics>>>({})
@@ -431,6 +557,7 @@ export function EntelMonitoringMap() {
   const activeAlarms = alarmLog.filter((alarm) => !alarm.resolvedAt)
   const activeScenarioIds = new Set(activeAlarms.map((alarm) => alarm.scenarioId))
   const highlightedLinks = new Set(activeAlarms.flatMap((alarm) => [...alarm.affectedLinks, ...(alarm.rerouteLinks ?? [])]))
+  const activeOverlayLinks = ENTEL_LINKS.filter((link) => highlightedLinks.has(link.id))
   const activeNodes = Object.values(nodeTelemetry).filter(({ status }) => status !== "critical" && status !== "unknown").length
   const okLinks = Object.values(linkTelemetry).filter(({ status }) => status === "ok").length
   const criticalLinks = Object.values(linkTelemetry).filter(({ status }) => status === "critical").length
@@ -452,9 +579,18 @@ export function EntelMonitoringMap() {
 
     return nextLoad > currentLoad ? link : current
   }, ENTEL_LINKS[0])
+  const backboneScenarios = SCENARIOS.filter((scenario) => !scenario.id.startsWith("cbba-"))
+  const cochabambaScenarios = SCENARIOS.filter((scenario) => scenario.id.startsWith("cbba-"))
 
   function activateScenario(scenario: Scenario) {
     if (activeAlarms.length) return
+
+    const firstAffectedLink = ENTEL_LINKS.find((link) => scenario.affectedLinks.includes(link.id))
+
+    if (firstAffectedLink) {
+      setSelectedLinkId(firstAffectedLink.id)
+      setVisibleLayer(firstAffectedLink.layer === "distribution" ? "distribution" : "both")
+    }
 
     setLinkMetricPatches(scenario.linkMetricPatches ?? {})
     setNodeMetricPatches(scenario.nodeMetricPatches ?? {})
@@ -589,6 +725,7 @@ export function EntelMonitoringMap() {
                   const telemetry = linkTelemetry[link.id]
                   const isSelected = selectedLink.id === link.id
                   const isReroute = activeAlarms.some((alarm) => alarm.rerouteLinks?.includes(link.id))
+                  const isHighlighted = highlightedLinks.has(link.id)
                   const color = getLinkColor(link, telemetry.status, isReroute)
 
                   return (
@@ -596,10 +733,10 @@ export function EntelMonitoringMap() {
                       key={link.id}
                       positions={getLinkPositions(link)}
                       pathOptions={{
-                        className: telemetry.status === "critical" ? "fiber-critical-link" : undefined,
+                        className: getLinkAnimationClass(telemetry.status, isReroute, isHighlighted),
                         color,
                         weight: isSelected ? 7 : link.layer === "backbone" ? link.type === "backbone" ? 5 : 4 : 2.5,
-                        opacity: isSelected || highlightedLinks.has(link.id) ? 0.95 : 0.78,
+                        opacity: isSelected || isHighlighted ? 0.95 : 0.78,
                         dashArray: link.type === "international" ? "8 8" : isReroute ? "12 6" : undefined,
                       }}
                       eventHandlers={{ click: () => setSelectedLinkId(link.id) }}
@@ -618,6 +755,28 @@ export function EntelMonitoringMap() {
                   )
                 })}
 
+                {activeOverlayLinks.map((link) => {
+                  const telemetry = linkTelemetry[link.id]
+                  const isReroute = activeAlarms.some((alarm) => alarm.rerouteLinks?.includes(link.id))
+                  const isAffected = activeAlarms.some((alarm) => alarm.affectedLinks.includes(link.id))
+                  const status = isReroute && !isAffected ? "warning" : telemetry.status
+
+                  return (
+                    <Polyline
+                      key={`alarm-${link.id}`}
+                      interactive={false}
+                      positions={getLinkPositions(link)}
+                      pathOptions={{
+                        className: getLinkAnimationClass(status, isReroute, true),
+                        color: getLinkColor(link, status, isReroute),
+                        dashArray: isReroute ? "12 6" : link.type === "international" ? "8 8" : undefined,
+                        opacity: 1,
+                        weight: link.layer === "distribution" ? 8 : 10,
+                      }}
+                    />
+                  )
+                })}
+
                 {visibleNodes.map((node) => {
                   const telemetry = nodeTelemetry[node.id]
                   const statusColor = STATUS_META[telemetry.status].color
@@ -628,7 +787,7 @@ export function EntelMonitoringMap() {
                       <Polygon
                         key={node.id}
                         positions={gatewayDiamond(node.lat, node.lon)}
-                        pathOptions={{ color: "#f97316", fillColor: statusColor, fillOpacity: 0.9, weight: 3 }}
+                        pathOptions={{ className: getNodeAnimationClass(telemetry.status), color: "#f97316", fillColor: statusColor, fillOpacity: 0.9, weight: 3 }}
                       >
                         <Tooltip>{node.name}</Tooltip>
                         <Popup>
@@ -644,6 +803,7 @@ export function EntelMonitoringMap() {
                       center={[node.lat, node.lon]}
                       radius={node.datacenter ? 14 : radius}
                       pathOptions={{
+                        className: getNodeAnimationClass(telemetry.status),
                         color: node.datacenter ? "#0f172a" : node.layer === "distribution" ? "#38bdf8" : "#1d4ed8",
                         fillColor: statusColor,
                         fillOpacity: 0.9,
@@ -664,6 +824,13 @@ export function EntelMonitoringMap() {
                   Zoom {mapZoom}: distribucion visible {showDistribution ? "activa" : "desde zoom 9 o modo distribucion"}.
                 </p>
               </div>
+              {activeAlarms[0] ? (
+                <div className="pointer-events-none absolute right-4 top-4 z-[1000] max-w-xs rounded-lg border border-red-500/40 bg-background/95 p-3 text-xs shadow-lg fiber-alert-panel">
+                  <p className="font-semibold text-red-600 dark:text-red-300">Alarma activa</p>
+                  <p className="mt-1 text-foreground">{activeAlarms[0].title}</p>
+                  <p className="mt-1 text-muted-foreground">{activeAlarms[0].description}</p>
+                </div>
+              ) : null}
             </div>
           </CardContent>
         </Card>
@@ -683,20 +850,21 @@ export function EntelMonitoringMap() {
             <CardTitle>Simulacion de fallas</CardTitle>
             <CardDescription>Los botones alteran metricas; las reglas calculan el estado.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-2">
-            {SCENARIOS.map((scenario) => (
-              <Button
-                key={scenario.id}
-                type="button"
-                variant={activeScenarioIds.has(scenario.id) ? "secondary" : "outline"}
-                className="h-auto w-full justify-start whitespace-normal py-2 text-left"
-                disabled={activeAlarms.length > 0}
-                onClick={() => activateScenario(scenario)}
-              >
-                <ShieldAlertIcon data-icon="inline-start" />
-                {scenario.title}
-              </Button>
-            ))}
+          <CardContent className="space-y-4">
+            <ScenarioButtonGroup
+              activeAlarms={activeAlarms}
+              activeScenarioIds={activeScenarioIds}
+              label="Backbone nacional"
+              scenarios={backboneScenarios}
+              onActivate={activateScenario}
+            />
+            <ScenarioButtonGroup
+              activeAlarms={activeAlarms}
+              activeScenarioIds={activeScenarioIds}
+              label="Distribucion Cochabamba"
+              scenarios={cochabambaScenarios}
+              onActivate={activateScenario}
+            />
             <Button type="button" variant="ghost" className="w-full justify-start" onClick={resolveAll}>
               <RotateCcwIcon data-icon="inline-start" />
               Resolver todo
@@ -742,6 +910,39 @@ function MetricCard({ icon: Icon, label, value, detail }: { icon: ComponentType<
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+function ScenarioButtonGroup({
+  activeAlarms,
+  activeScenarioIds,
+  label,
+  scenarios,
+  onActivate,
+}: {
+  activeAlarms: AlarmRecord[]
+  activeScenarioIds: Set<string>
+  label: string
+  scenarios: Scenario[]
+  onActivate: (scenario: Scenario) => void
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+      {scenarios.map((scenario) => (
+        <Button
+          key={scenario.id}
+          type="button"
+          variant={activeScenarioIds.has(scenario.id) ? "secondary" : "outline"}
+          className="h-auto w-full justify-start whitespace-normal py-2 text-left"
+          disabled={activeAlarms.length > 0}
+          onClick={() => onActivate(scenario)}
+        >
+          <ShieldAlertIcon data-icon="inline-start" />
+          {scenario.title}
+        </Button>
+      ))}
+    </div>
   )
 }
 
