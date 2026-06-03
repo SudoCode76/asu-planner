@@ -37,7 +37,7 @@ export function AppShell({
             <MapIcon />
           </div>
           <div>
-            <p className="font-semibold">FiberMap ASU</p>
+            <p className="font-semibold">ASU PLANNER</p>
             <p className="text-xs text-muted-foreground">Presupuesto optico ASU</p>
           </div>
         </div>
@@ -80,7 +80,7 @@ export function AppShell({
       <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b bg-background/95 px-4 shadow-sm lg:hidden">
         <Link href="/dashboard" className="flex items-center gap-2 font-semibold">
           <MapIcon />
-          FiberMap ASU
+          ASU PLANNER
         </Link>
         <div className="flex items-center gap-2">
           <ThemeToggle />

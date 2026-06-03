@@ -67,7 +67,7 @@ const LinkMap = dynamic(
 
 type MapMode = "select" | "pole" | "measure" | "inspect"
 type DesignMode = "free" | "entel"
-type DemoKind = "viable" | "non_viable"
+type DemoKind = "viable" | "critical" | "non_viable"
 type TabValue = "mapa" | "ruta" | "optico" | "mecanico" | "capas"
 
 type FormState = {
@@ -133,6 +133,19 @@ const DEMO_LINK_STATES: Record<DemoKind, FormState> = {
     description: "Caso demo con margen optico holgado para validar un enlace viable.",
     transmitter_power_dbm: 3,
     receiver_sensitivity_dbm: -24,
+    attenuation_db_per_km: 0.22,
+    splice_count: 6,
+    splice_loss_db: 0.1,
+    connector_count: 4,
+    connector_loss_db: 0.3,
+    safety_margin_db: 3,
+  },
+  critical: {
+    ...DEMO_BASE_STATE,
+    name: "Demo critico ASU - Zona urbana",
+    description: "Caso demo con margen optico positivo pero menor al minimo viable.",
+    transmitter_power_dbm: -7,
+    receiver_sensitivity_dbm: -15,
     attenuation_db_per_km: 0.22,
     splice_count: 6,
     splice_loss_db: 0.1,
@@ -415,7 +428,7 @@ export function LinkDesigner({
       ...(lineCoordinates.length >= 2
         ? [{
             type: "Feature",
-            properties: { name: state.name || "Ruta FiberMap ASU", kind: "fiber_route" },
+            properties: { name: state.name || "Ruta ASU PLANNER", kind: "fiber_route" },
             geometry: { type: "LineString", coordinates: lineCoordinates },
           }]
         : []),
@@ -592,6 +605,7 @@ export function LinkDesigner({
                       <SelectContent>
                         <SelectGroup>
                           <SelectItem value="viable">Demo viable</SelectItem>
+                          <SelectItem value="critical">Demo critico</SelectItem>
                           <SelectItem value="non_viable">Demo no viable</SelectItem>
                         </SelectGroup>
                       </SelectContent>

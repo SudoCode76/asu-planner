@@ -38,7 +38,7 @@ export default async function DashboardPage() {
             </div>
             <div className="flex max-w-3xl flex-col gap-3">
               <CardTitle className="text-3xl font-semibold tracking-tight md:text-4xl">
-                FiberMap ASU
+                ASU PLANNER
               </CardTitle>
               <CardDescription className="text-base">
                 Disena, evalua y guarda enlaces aereos de fibra optica entre dos puntos

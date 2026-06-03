@@ -17,7 +17,7 @@ export function AuthCard({
         <CardHeader>
           <div className="mb-2 flex items-center gap-2">
             <MapIcon />
-            <span className="font-semibold">FiberMap ASU</span>
+            <span className="font-semibold">ASU PLANNER</span>
           </div>
           <CardTitle>{title}</CardTitle>
           <CardDescription>{description}</CardDescription>

@@ -6,7 +6,7 @@ import "./globals.css";
 import "leaflet/dist/leaflet.css";
 
 export const metadata: Metadata = {
-  title: "FiberMap ASU",
+  title: "ASU PLANNER",
   description: "Sistema georreferenciado para enlaces de fibra optica ASU.",
 };
 

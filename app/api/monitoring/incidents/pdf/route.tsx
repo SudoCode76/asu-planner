@@ -274,12 +274,12 @@ function IncidentDocument({ payload }: { payload: IncidentPayload }) {
 
   return (
     <Document
-      author="FiberMap ASU"
+      author="ASU PLANNER"
       subject="Reporte simulado de incidente NOC"
       title={`NOC Entel - ${payload.alarm.title}`}
     >
       <Page size="A4" style={styles.page}>
-        <Text style={styles.brand}>FiberMap ASU / Consola NOC Entel Bolivia</Text>
+        <Text style={styles.brand}>ASU PLANNER / Consola NOC Entel Bolivia</Text>
         <Text style={styles.title}>Reporte tecnico de incidente NOC</Text>
         <Text style={styles.subtitle}>{payload.alarm.title}</Text>
         <Text

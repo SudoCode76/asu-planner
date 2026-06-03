@@ -341,14 +341,14 @@ function ReportDocument({ design }: { design: LinkDesign }) {
 
   return (
     <Document
-      author="FiberMap ASU"
+      author="ASU PLANNER"
       subject="Reporte tecnico de enlace de fibra optica aerea"
-      title={`FiberMap ASU - ${design.name}`}
+      title={`ASU PLANNER - ${design.name}`}
     >
       <Page size="A4" style={styles.page}>
         <View style={styles.cover}>
           <View style={styles.coverHero}>
-            <Text style={styles.brand}>FiberMap ASU</Text>
+            <Text style={styles.brand}>ASU PLANNER</Text>
             <Text style={styles.title}>Reporte tecnico de enlace</Text>
             <Text style={styles.subtitle}>{design.name}</Text>
             <StatusBadgePdf design={design} />
@@ -502,7 +502,7 @@ function ReportDocument({ design }: { design: LinkDesign }) {
         </Section>
 
         <Text style={styles.footer}>
-          Reporte generado por FiberMap ASU. Los resultados dependen de los parametros ingresados y deben validarse contra especificaciones reales de equipos y cable.
+          Reporte generado por ASU PLANNER. Los resultados dependen de los parametros ingresados y deben validarse contra especificaciones reales de equipos y cable.
         </Text>
       </Page>
     </Document>
