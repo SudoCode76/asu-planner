@@ -28,7 +28,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet, FieldLegend 
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import type { LinkDesign } from "@/lib/database.types"
 import {
@@ -153,30 +153,6 @@ const DEMO_LINK_STATES: Record<DemoKind, FormState> = {
     connector_loss_db: 0.5,
     safety_margin_db: 3,
   },
-}
-
-const FIELD_TABS: Record<string, TabValue> = {
-  name: "optico",
-  real_distance_km: "optico",
-  cable_type: "optico",
-  fiber_strands: "optico",
-  wavelength_nm: "optico",
-  fiber_type: "optico",
-  transmitter_power_dbm: "optico",
-  receiver_sensitivity_dbm: "optico",
-  attenuation_db_per_km: "optico",
-  splice_count: "optico",
-  splice_loss_db: "optico",
-  connector_count: "optico",
-  connector_loss_db: "optico",
-  safety_margin_db: "optico",
-  point_a: "mapa",
-  point_a_lat: "mapa",
-  point_a_lng: "mapa",
-  point_b: "mapa",
-  point_b_lat: "mapa",
-  point_b_lng: "mapa",
-  map_distance_km: "mapa",
 }
 
 const EMPTY_ACTION_STATE: DesignActionState = { status: "idle" }
@@ -489,10 +465,6 @@ export function LinkDesigner({
     event.target.value = ""
   }
 
-  function tabHasError(tab: TabValue) {
-    return Object.keys(fieldErrors).some((field) => (FIELD_TABS[field] ?? "optico") === tab)
-  }
-
   function focusFirstIncompleteSection() {
     if (!state.pointA || !state.pointB) {
       setActiveTab("mapa")
@@ -551,14 +523,6 @@ export function LinkDesigner({
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabValue)} className="flex flex-col gap-4">
-              <TabsList className="grid w-full grid-cols-5">
-                <TabsTrigger value="mapa" className={cn(tabHasError("mapa") && "text-destructive")}>Mapa</TabsTrigger>
-                <TabsTrigger value="ruta" className={cn(tabHasError("ruta") && "text-destructive")}>Ruta</TabsTrigger>
-                <TabsTrigger value="optico" className={cn(tabHasError("optico") && "text-destructive")}>Optico</TabsTrigger>
-                <TabsTrigger value="mecanico" className={cn(tabHasError("mecanico") && "text-destructive")}>Mecanico</TabsTrigger>
-                <TabsTrigger value="capas" className={cn(tabHasError("capas") && "text-destructive")}>Capas</TabsTrigger>
-              </TabsList>
-
               <TabsContent value="mapa" forceMount className="flex flex-col gap-4">
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" size="sm" variant={designMode === "free" ? "default" : "outline"} onClick={() => setDesignMode("free")}>

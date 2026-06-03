@@ -6,6 +6,7 @@ import {
   AlertTriangleIcon,
   CheckCircle2Icon,
   Clock3Icon,
+  FileTextIcon,
   GaugeIcon,
   ListTreeIcon,
   NetworkIcon,
@@ -611,6 +612,8 @@ export function EntelMonitoringMap() {
   const [mapZoom, setMapZoom] = useState(6)
   const [uptimeSeconds, setUptimeSeconds] = useState(0)
   const [tick, setTick] = useState(0)
+  const [isGeneratingIncidentReport, setIsGeneratingIncidentReport] = useState(false)
+  const [incidentReportError, setIncidentReportError] = useState<string | null>(null)
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -946,6 +949,76 @@ export function EntelMonitoringMap() {
     setAlarmLog((current) => current.map((alarm) => alarm.resolvedAt ? alarm : { ...alarm, resolvedAt: now }))
   }
 
+  async function generateIncidentReport(alarm: AlarmRecord, link: EntelLink, telemetry: { metrics: LinkMetrics; status: NetworkStatus }) {
+    const fromNode = getNode(link.from)
+    const toNode = getNode(link.to)
+    const metrics = telemetry.metrics
+    const normalGbps = round(link.gbps * (metrics.trafficLoadPercent / 100), 2)
+    const switchedGbps = alarm.switchedTrafficGbps ?? 0
+    const lostGbps = metrics.availabilityPercent === 0
+      ? normalGbps
+      : telemetry.status === "critical"
+        ? round(normalGbps * 0.35, 2)
+        : 0
+    const remainingCapacityGbps = alarm.remainingCapacityGbps ?? round(Math.max(0, link.gbps - normalGbps - switchedGbps), 2)
+
+    setIsGeneratingIncidentReport(true)
+    setIncidentReportError(null)
+
+    try {
+      const response = await fetch("/api/monitoring/incidents/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          alarm: {
+            ...alarm,
+            startedAt: alarm.startedAt.toISOString(),
+          },
+          link,
+          fromNode,
+          toNode,
+          metrics,
+          baselineMetrics: link.metrics,
+          status: telemetry.status,
+          traceEvents: alarm.traceOverrides?.[link.id] ?? link.traceEvents,
+          routePath: getLinkPositions(link, resolvedRoutePaths),
+          traffic: {
+            normalGbps,
+            switchedGbps,
+            lostGbps,
+            remainingCapacityGbps,
+          },
+          logs: buildLinkLogs(link, telemetry.status, metrics, alarm),
+          generatedAt: new Date().toISOString(),
+        }),
+      })
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => null) as { error?: string } | null
+
+        throw new Error(errorBody?.error ?? "El servidor no pudo generar el reporte PDF.")
+      }
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const popup = window.open(url, "_blank", "noopener,noreferrer")
+
+      if (!popup) {
+        const downloadLink = document.createElement("a")
+
+        downloadLink.href = url
+        downloadLink.download = `noc-entel-${alarm.id}.pdf`
+        downloadLink.click()
+      }
+
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 60000)
+    } catch (error) {
+      setIncidentReportError(error instanceof Error ? error.message : "No se pudo generar el PDF NOC.")
+    } finally {
+      setIsGeneratingIncidentReport(false)
+    }
+  }
+
   return (
     <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_420px]">
       <div className="flex min-w-0 flex-col gap-4">
@@ -1170,10 +1243,31 @@ export function EntelMonitoringMap() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Diagnostico activo</CardTitle>
-            <CardDescription>{activeAlarms.length ? "Alarmas detectadas por reglas." : "Sin alarmas activas."}</CardDescription>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <CardTitle>Diagnostico activo</CardTitle>
+                <CardDescription>{activeAlarms.length ? "Alarmas detectadas por reglas." : "Sin alarmas activas."}</CardDescription>
+              </div>
+              {activeImpactAlarm && activeImpactLink && activeImpactTelemetry ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void generateIncidentReport(activeImpactAlarm, activeImpactLink, activeImpactTelemetry)}
+                  disabled={isGeneratingIncidentReport}
+                >
+                  <FileTextIcon data-icon="inline-start" />
+                  {isGeneratingIncidentReport ? "Generando..." : "Generar reporte PDF"}
+                </Button>
+              ) : null}
+            </div>
           </CardHeader>
           <CardContent className="space-y-3">
+            {incidentReportError ? (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
+                {incidentReportError}
+              </div>
+            ) : null}
             {activeAlarms.length ? activeAlarms.map((alarm) => (
               <AlarmCard
                 key={alarm.id}
