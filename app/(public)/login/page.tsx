@@ -3,6 +3,7 @@ import { CircleUserRoundIcon, LogInIcon } from "lucide-react"
 
 import { login, signInWithGoogle } from "@/app/actions/auth"
 import { AuthCard } from "@/components/auth/auth-card"
+import { AuthFeedback } from "@/components/auth/auth-feedback"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -30,16 +31,7 @@ export default async function LoginPage({ searchParams }: Props) {
       description="Accede para guardar y consultar tus calculos de enlaces."
     >
       <div className="flex flex-col gap-5">
-        {error ? (
-          <p className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
-        {params.message ? (
-          <p className="rounded-lg border bg-muted p-3 text-sm text-muted-foreground">
-            {params.message}
-          </p>
-        ) : null}
+        <AuthFeedback error={error} message={params.message} />
         <form action={login}>
           <input type="hidden" name="next" value={params.next ?? "/dashboard"} />
           <FieldGroup>

@@ -1,4 +1,5 @@
 import Link from "next/link"
+import { PlusIcon } from "lucide-react"
 
 import { CompareClient } from "@/components/links/compare-client"
 import { Button } from "@/components/ui/button"
@@ -11,9 +12,17 @@ export default async function ComparePage() {
 
   return (
     <>
-      <div>
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+        <div>
         <h1 className="text-2xl font-semibold tracking-tight">Comparar calculos</h1>
         <p className="text-muted-foreground">Evalua lado a lado tus disenos guardados.</p>
+        </div>
+        <Button asChild>
+          <Link href="/links/new">
+            <PlusIcon data-icon="inline-start" />
+            Nuevo diseno
+          </Link>
+        </Button>
       </div>
       {designs.length ? (
         <CompareClient designs={designs} />

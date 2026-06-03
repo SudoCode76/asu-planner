@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react"
 
 import { StatusBadge } from "@/components/status-badge"
+import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import type { LinkDesign } from "@/lib/database.types"
@@ -26,14 +27,17 @@ export function CompareClient({ designs }: { designs: LinkDesign[] }) {
 
   return (
     <div className="grid gap-6 xl:grid-cols-[320px_1fr]">
-      <Card>
+      <Card className="overflow-hidden">
         <CardHeader>
-          <CardTitle>Seleccionar</CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle>Seleccionar</CardTitle>
+            <Badge variant="secondary">{selectedDesigns.length}/4</Badge>
+          </div>
           <CardDescription>Compara hasta cuatro calculos guardados.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {designs.map((design) => (
-            <label key={design.id} className="flex cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm">
+            <label key={design.id} className="flex cursor-pointer items-center gap-3 rounded-lg border bg-background p-3 text-sm hover:bg-muted/50">
               <input
                 type="checkbox"
                 checked={selected.includes(design.id)}
@@ -46,13 +50,14 @@ export function CompareClient({ designs }: { designs: LinkDesign[] }) {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="overflow-hidden">
         <CardHeader>
           <CardTitle>Comparacion tecnica</CardTitle>
           <CardDescription>Distancia, perdida y margen de los disenos seleccionados.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
+          <div className="overflow-hidden rounded-lg border">
+            <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Diseno</TableHead>
@@ -65,7 +70,7 @@ export function CompareClient({ designs }: { designs: LinkDesign[] }) {
             </TableHeader>
             <TableBody>
               {selectedDesigns.map((design) => (
-                <TableRow key={design.id}>
+                <TableRow key={design.id} className="hover:bg-muted/50">
                   <TableCell className="font-medium">{design.name}</TableCell>
                   <TableCell>{design.real_distance_km.toFixed(4)} km</TableCell>
                   <TableCell>{design.total_loss_db.toFixed(4)} dB</TableCell>
@@ -77,7 +82,8 @@ export function CompareClient({ designs }: { designs: LinkDesign[] }) {
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </div>

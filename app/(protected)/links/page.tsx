@@ -28,7 +28,9 @@ export default async function LinksPage({ searchParams }: Props) {
       <section className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Historial de calculos</h1>
-          <p className="text-muted-foreground">Consulta, filtra y abre disenos guardados.</p>
+          <p className="text-muted-foreground">
+            Consulta, filtra y abre tus disenos guardados para editarlos, compararlos o reportarlos.
+          </p>
         </div>
         <Button asChild>
           <Link href="/links/new">
@@ -38,13 +40,15 @@ export default async function LinksPage({ searchParams }: Props) {
         </Button>
       </section>
 
-      <Card>
+      <Card className="overflow-hidden">
         <CardHeader>
           <CardTitle>Disenos guardados</CardTitle>
-          <CardDescription>Cada fila pertenece a tu usuario y esta protegida por RLS.</CardDescription>
+          <CardDescription>
+            Cada fila pertenece a tu usuario, se recalculo en servidor y esta protegida por RLS.
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <form className="grid gap-3 md:grid-cols-[1fr_220px_auto]">
+          <form className="grid gap-3 rounded-lg border bg-muted/30 p-3 md:grid-cols-[1fr_220px_auto]">
             <Input name="q" defaultValue={params.q} placeholder="Buscar por nombre" />
             <Select name="status" defaultValue={status}>
               <SelectTrigger className="w-full">
@@ -66,7 +70,8 @@ export default async function LinksPage({ searchParams }: Props) {
           </form>
 
           {designs.length ? (
-            <Table>
+            <div className="overflow-hidden rounded-lg border">
+              <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Nombre</TableHead>
@@ -78,7 +83,7 @@ export default async function LinksPage({ searchParams }: Props) {
               </TableHeader>
               <TableBody>
                 {designs.map((design) => (
-                  <TableRow key={design.id}>
+                  <TableRow key={design.id} className="hover:bg-muted/50">
                     <TableCell className="font-medium">{design.name}</TableCell>
                     <TableCell>{design.real_distance_km.toFixed(4)} km</TableCell>
                     <TableCell>{design.final_margin_db.toFixed(4)} dB</TableCell>
@@ -96,7 +101,8 @@ export default async function LinksPage({ searchParams }: Props) {
                   </TableRow>
                 ))}
               </TableBody>
-            </Table>
+              </Table>
+            </div>
           ) : (
             <Empty>
               <EmptyHeader>

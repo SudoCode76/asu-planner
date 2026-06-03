@@ -130,6 +130,114 @@
 }
 
 .leaflet-container {
-  min-height: 100%;
   font: inherit;
+  background: var(--background);
+}
+
+.leaflet-tile-pane {
+  background: oklch(1 0 0);
+}
+
+.leaflet-container img.leaflet-tile {
+  max-width: none !important;
+  max-height: none !important;
+}
+
+.fiber-critical-link {
+  animation: fiber-critical-pulse 0.9s ease-in-out infinite;
+  filter: drop-shadow(0 0 6px rgb(220 38 38 / 0.75));
+}
+
+.fiber-warning-link {
+  animation: fiber-warning-pulse 1.6s ease-in-out infinite;
+  filter: drop-shadow(0 0 5px rgb(234 179 8 / 0.55));
+}
+
+.fiber-reroute-link {
+  animation: fiber-reroute-flow 1.1s linear infinite;
+  filter: drop-shadow(0 0 6px rgb(14 165 233 / 0.7));
+  stroke-dasharray: 12 8;
+}
+
+.fiber-node-warning {
+  animation: fiber-node-warning-pulse 1.6s ease-in-out infinite;
+  filter: drop-shadow(0 0 5px rgb(234 179 8 / 0.55));
+}
+
+.fiber-node-critical {
+  animation: fiber-node-critical-pulse 0.85s ease-in-out infinite;
+  filter: drop-shadow(0 0 7px rgb(220 38 38 / 0.8));
+}
+
+.fiber-alert-panel {
+  animation: fiber-alert-panel-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes fiber-critical-pulse {
+  0%,
+  100% {
+    stroke-opacity: 0.45;
+    stroke-width: 4;
+  }
+  50% {
+    stroke-opacity: 1;
+    stroke-width: 8;
+  }
+}
+
+@keyframes fiber-warning-pulse {
+  0%,
+  100% {
+    stroke-opacity: 0.58;
+    stroke-width: 3;
+  }
+  50% {
+    stroke-opacity: 1;
+    stroke-width: 6;
+  }
+}
+
+@keyframes fiber-reroute-flow {
+  0% {
+    stroke-dashoffset: 24;
+    stroke-opacity: 0.65;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    stroke-opacity: 1;
+  }
+}
+
+@keyframes fiber-node-warning-pulse {
+  0%,
+  100% {
+    fill-opacity: 0.65;
+    stroke-width: 3;
+  }
+  50% {
+    fill-opacity: 1;
+    stroke-width: 5;
+  }
+}
+
+@keyframes fiber-node-critical-pulse {
+  0%,
+  100% {
+    fill-opacity: 0.55;
+    stroke-width: 3;
+  }
+  50% {
+    fill-opacity: 1;
+    stroke-width: 6;
+  }
+}
+
+@keyframes fiber-alert-panel-pulse {
+  0%,
+  100% {
+    box-shadow: 0 12px 28px rgb(15 23 42 / 0.18), 0 0 0 0 rgb(220 38 38 / 0.24);
+  }
+  50% {
+    box-shadow: 0 12px 28px rgb(15 23 42 / 0.18), 0 0 0 5px rgb(220 38 38 / 0.08);
+  }
 }
